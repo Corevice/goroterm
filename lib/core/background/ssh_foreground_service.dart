@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 /// Android Foreground Service ラッパー。
@@ -68,12 +69,14 @@ class SshForegroundService {
     final text = '$sessionCount session${sessionCount == 1 ? '' : 's'} active';
 
     if (!_running) {
+      debugPrint('[SSH] Starting foreground service');
       await FlutterForegroundTask.startService(
         notificationTitle: title,
         notificationText: text,
         callback: _serviceCallback,
       );
       _running = true;
+      debugPrint('[SSH] Foreground service started');
     } else {
       await FlutterForegroundTask.updateService(
         notificationTitle: title,
@@ -88,6 +91,7 @@ class SshForegroundService {
   static Future<void> stop() async {
     if (!Platform.isAndroid) return;
     if (!_running) return;
+    debugPrint('[SSH] Stopping foreground service');
     await FlutterForegroundTask.stopService();
     _running = false;
   }
@@ -101,19 +105,26 @@ void _serviceCallback() {
 }
 
 class _KeepAliveTaskHandler extends TaskHandler {
+  int _tickCount = 0;
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    // サービス起動/再起動直後に即座に keepalive を送信
+    debugPrint('[SSH][service] TaskHandler onStart');
     FlutterForegroundTask.sendDataToMain('keepalive');
   }
 
   @override
   void onRepeatEvent(DateTime timestamp) {
-    // メインイソレートに keepalive メッセージを送信
-    // これによりメインイソレートのイベントループが活性化される
+    _tickCount++;
+    // 6回（60秒）に1回だけログ出力（頻繁すぎるとログが溢れる）
+    if (_tickCount % 6 == 0) {
+      debugPrint('[SSH][service] onRepeatEvent tick #$_tickCount');
+    }
     FlutterForegroundTask.sendDataToMain('keepalive');
   }
 
   @override
-  Future<void> onDestroy(DateTime timestamp) async {}
+  Future<void> onDestroy(DateTime timestamp) async {
+    debugPrint('[SSH][service] TaskHandler onDestroy');
+  }
 }

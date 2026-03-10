@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../../core/platform/download_helper.dart';
-import '../../core/platform/file_writer_isolate.dart';
+import '../../core/platform/download_isolate.dart';
 import 'dart:io';
 
 import '../../core/error/app_error.dart';
@@ -91,6 +91,32 @@ class FileBrowserNotifier
   int _loadGeneration = 0;
   bool _isDownloading = false;
   int _downloadGeneration = 0;
+  DownloadIsolate? _activeDownload;
+
+  // ダウンロード専用 Isolate のための接続情報
+  String? _host;
+  int _port = 22;
+  String? _username;
+  String? _password;
+  String? _privateKeyPem;
+  String? _passphrase;
+
+  /// ダウンロード用の接続情報を設定する。
+  void setConnectionCredentials({
+    required String host,
+    required int port,
+    required String username,
+    String? password,
+    String? privateKeyPem,
+    String? passphrase,
+  }) {
+    _host = host;
+    _port = port;
+    _username = username;
+    _password = password;
+    _privateKeyPem = privateKeyPem;
+    _passphrase = passphrase;
+  }
 
   /// Called by TerminalScreen when the SSH channelManager changes.
   void setChannelManager(SshChannelManager? channelManager) {
@@ -98,6 +124,8 @@ class FileBrowserNotifier
     _channelManager = channelManager;
     _sftp = null;
     _downloadGeneration++;
+    _activeDownload?.cancel();
+    _activeDownload = null;
     if (channelManager != null) {
       _initializeState(channelManager);
     } else {
@@ -297,6 +325,12 @@ class FileBrowserNotifier
     String remotePath,
     FileBrowserState baseState,
   ) async {
+    final host = _host;
+    final username = _username;
+    if (host == null || username == null) {
+      throw NetworkError('Connection credentials not set');
+    }
+
     final sftp = _sftp ?? (throw NetworkError('SFTP not initialized'));
     final filename = p.basename(remotePath);
     final generation = _downloadGeneration;
@@ -314,151 +348,52 @@ class FileBrowserNotifier
       totalBytes = stat.size ?? 0;
     } catch (_) {}
 
-    // cat コマンドで高速ダウンロード（SSHSession を保持してメモリリーク防止）
-    final channelManager = _channelManager ??
-        (throw NetworkError('Channel manager not initialized'));
-    final execSession = await channelManager.openExecStream(remotePath);
+    // ダウンロード全体を別 Isolate で実行。
+    // SSH 接続の確立・SFTP プロトコル処理・ファイル書き込みのすべてが
+    // バックグラウンド Isolate で行われるため、メインアイソレートの
+    // UI スレッドを一切ブロックしない。
+    final download = await DownloadIsolate.start(
+      host: host,
+      port: _port,
+      username: username,
+      password: _password,
+      privateKeyPem: _privateKeyPem,
+      passphrase: _passphrase,
+      remotePath: remotePath,
+      localPath: tempPath,
+      totalBytes: totalBytes,
+    );
+    _activeDownload = download;
 
-    int received = 0;
-    // ファイル書き込みをバックグラウンド Isolate にオフロード。
-    // メインアイソレートは chunk を SendPort 経由で転送するだけ。
-    final writer = await FileWriterIsolate.open(tempPath);
+    // 進捗をリスンして UI を更新
+    StreamSubscription<double>? progressSub;
+    progressSub = download.progressStream.listen((progress) {
+      if (_downloadGeneration != generation) {
+        progressSub?.cancel();
+        return;
+      }
+      final cur = state.valueOrNull;
+      if (cur != null) {
+        state = AsyncData(cur.copyWith(downloadProgress: progress));
+      }
+    });
+
     try {
-      // 進捗更新はタイマーベース（200ms 間隔）。
-      // ストリームリスナー内では state 更新や flush を行わない。
-      // これにより Dart イベントループを軽量に保ち、
-      // dartssh2 の SSH ウィンドウ調整が遅延なく処理される。
-      final completer = Completer<void>();
-      StreamSubscription<Uint8List>? subscription;
-      Object? streamError;
+      final error = await download.result;
+      _activeDownload = null;
+      await progressSub.cancel();
 
-      // 進捗タイマー: 500ms ごとに UI を更新。
-      // 頻度を下げて Riverpod リビルドによる UI スレッド負荷を軽減する。
-      // AsyncError/Loading 状態を上書きしないよう valueOrNull の null チェックを行う
-      final progressTimer = Timer.periodic(
-        const Duration(milliseconds: 500),
-        (_) {
-          if (totalBytes > 0 && received > 0) {
-            final cur = state.valueOrNull;
-            if (cur == null) return; // AsyncError/Loading を上書きしない
-            state = AsyncData(
-              cur.copyWith(downloadProgress: received / totalBytes),
-            );
-          }
-        },
-      );
-
-      // 連続データ受信でイベントループが占有されないよう、
-      // 256KB ごとにストリームを一時停止して UI に制御を返す。
-      var receivedSinceYield = 0;
-      const yieldThreshold = 256 * 1024; // 256KB
-
-      subscription = execSession.stdout.listen(
-        (chunk) {
-          if (completer.isCompleted) return;
-          if (_downloadGeneration != generation) {
-            streamError = NetworkError('Download cancelled');
-            subscription?.cancel();
-            if (!completer.isCompleted) completer.complete();
-            return;
-          }
-          // リスナーは最小限の処理のみ:
-          // chunk を Isolate に転送 + カウンタ更新（state 更新や flush は行わない）
-          writer.addChunk(chunk);
-          received += chunk.length;
-          receivedSinceYield += chunk.length;
-          // 全データ受信済み → ストリーム終了を待たずに完了
-          if (totalBytes > 0 && received >= totalBytes) {
-            subscription?.cancel();
-            if (!completer.isCompleted) completer.complete();
-            return;
-          }
-          // 256KB 受信ごとにストリームを一時停止し、
-          // マイクロタスクで UI フレーム描画の時間を確保してから再開する。
-          if (receivedSinceYield >= yieldThreshold) {
-            receivedSinceYield = 0;
-            subscription?.pause();
-            Future.microtask(() {
-              if (!completer.isCompleted) {
-                subscription?.resume();
-              }
-            });
-          }
-        },
-        onError: (Object e) {
-          // エラー連発でリスナーが動き続けるのを防ぐため、即座にキャンセル
-          if (completer.isCompleted) return;
-          streamError ??= e;
-          subscription?.cancel();
-          completer.complete();
-        },
-        onDone: () {
-          if (!completer.isCompleted) completer.complete();
-        },
-        cancelOnError: false,
-      );
-
-      // session.done フォールバック:
-      // データ受信が止まってから 1 秒経過したら発動。
-      // 大容量ファイルのバッファ drain に最大 30 秒待機。
-      final doneFallback = execSession.done.then((_) async {
-        var idleTicks = 0;
-        var prev = received;
-        for (var i = 0; i < 300 && !completer.isCompleted; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-          if (received == prev) {
-            idleTicks++;
-            if (idleTicks >= 10) break; // 1 秒間データなし → 発動
-          } else {
-            prev = received;
-            idleTicks = 0;
-          }
-        }
-        if (!completer.isCompleted) {
-          streamError ??= NetworkError('Channel closed before stdout done');
-          completer.complete();
-        }
-      });
-
-      await completer.future;
-      progressTimer.cancel();
-      await subscription.cancel();
-      await doneFallback.catchError((_) {});
-
-      if (streamError != null) throw streamError!;
-
-      if (totalBytes > 0) {
-        final cur = state.valueOrNull ?? baseState;
-        state = AsyncData(cur.copyWith(downloadProgress: 1.0));
+      if (_downloadGeneration != generation) {
+        throw NetworkError('Download cancelled');
       }
-    } finally {
-      // Isolate 側で flush + close を行い、Isolate 終了を待つ。
-      // エラー時は Isolate を強制終了。
-      try {
-        await writer.close();
-      } catch (_) {
-        writer.kill();
+
+      if (error != null) {
+        throw NetworkError(error);
       }
-      // SSH チャネル（2MB バッファ）を解放
-      execSession.close();
-    }
-
-    // cat コマンドの終了コードをチェック（ファイル不在等のエラー検出）
-    final exitCode = execSession.exitCode;
-    if (exitCode != null && exitCode != 0) {
-      throw NetworkError('cat command failed with exit code $exitCode');
-    }
-
-    // 整合性チェック
-    if (totalBytes > 0 && received != totalBytes) {
-      throw NetworkError(
-        'Download incomplete: received $received of $totalBytes bytes',
-      );
-    }
-
-    // キャンセル済みなら保存しない
-    if (_downloadGeneration != generation) {
-      throw NetworkError('Download cancelled');
+    } catch (e) {
+      _activeDownload = null;
+      await progressSub.cancel();
+      rethrow;
     }
 
     // MediaStore で Downloads に保存（Android）/ シェアシート（iOS）

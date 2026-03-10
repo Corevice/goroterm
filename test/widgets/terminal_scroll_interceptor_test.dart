@@ -103,14 +103,16 @@ void main() {
         ),
       );
 
-      // 垂直スワイプを実行（方向判定閾値10pxを超えて、さらに複数行分スクロール）
-      final center = tester.getCenter(find.byType(TerminalScrollInterceptor));
-      final gesture = await tester.startGesture(center, kind: PointerDeviceKind.touch);
-      await gesture.moveBy(const Offset(0, -80));
-      await gesture.up();
+      // 垂直スワイプを実行（GestureDetector が認識できるよう tester.drag を使用）
+      await tester.drag(
+        find.byType(TerminalScrollInterceptor),
+        const Offset(0, -80),
+        kind: PointerDeviceKind.touch,
+        warnIfMissed: false,
+      );
       await tester.pump();
 
-      // mouseInput が呼ばれてエスケープシーケンスが出力されるはず
+      // mouseInput または keyInput が呼ばれてエスケープシーケンスが出力されるはず
       expect(outputs.isNotEmpty, isTrue);
     });
 

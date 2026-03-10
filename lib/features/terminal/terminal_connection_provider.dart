@@ -9,6 +9,7 @@ import '../../core/navigation/navigator_key.dart';
 import '../../core/ssh/connection_config.dart';
 import '../../core/ssh/ssh_client_service.dart';
 import '../../core/utils/app_logger.dart';
+import '../../core/utils/shell_utils.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/ssh/known_hosts_store.dart';
 import 'host_key_dialog.dart';
@@ -65,16 +66,22 @@ class TerminalConnectionNotifier
   String? _password;
   String? _privateKeyPem;
   String? _passphrase;
-  bool _isCheckingConnection = false;
+  String? _tmuxSessionName;
+  bool _shellOutputReceived = false;
+
+  // shell-ready 待機
+  static const _shellReadyInitialDelay = Duration(milliseconds: 300);
+  static const _shellReadyPollInterval = Duration(milliseconds: 100);
+  static const _shellReadyMaxPolls = 47; // 300ms + 47×100ms ≈ 5s
+
+  // 再接続（無制限リトライ + 指数バックオフ、最大30秒）
   Timer? _retryTimer;
-  Timer? _healthCheckTimer;
   int _retryCount = 0;
-  static const _maxRetries = 5;
-  DateTime? _lastReconnectAttempt;
-  DateTime? _lastAliveConfirmed;
+  bool _isReconnecting = false;
+
+  // keepalive
   bool _isActiveKeepAliveRunning = false;
   int _keepAliveFailCount = 0;
-  String? _tmuxSessionName;
 
   // Batch output buffer: accumulates SSH stdout chunks and flushes every 16 ms
   // to reduce UI thread work during high-throughput output.
@@ -84,8 +91,6 @@ class TerminalConnectionNotifier
   @override
   TerminalConnectionState build(String arg) {
     ref.onDispose(_cleanup);
-    // SSH 接続の生死は client.done のみで検知する
-    // connectivity_plus は Android 実機で過剰発火するため使用しない
     return const TerminalConnectionState();
   }
 
@@ -96,7 +101,6 @@ class TerminalConnectionNotifier
     String? passphrase,
     String? tmuxSessionName,
   }) async {
-    // 既に接続中または接続済みなら二重接続しない
     if (state.status == ConnectionStatus.connecting ||
         state.status == ConnectionStatus.connected) {
       return;
@@ -120,16 +124,15 @@ class TerminalConnectionNotifier
         privateKeyPem: privateKeyPem,
         passphrase: passphrase,
       );
-      _lastAliveConfirmed = DateTime.now();
       AppLogger.instance.log('[SSH][$arg] connected');
+      _retryCount = 0;
       state = state.copyWith(
         status: ConnectionStatus.connected,
         terminal: terminal,
         channelManager: _channelManager,
       );
-      _startHealthCheck();
     } catch (e) {
-      _cleanupConnections(); // SSH クライアントとチャネルを確実に解放
+      _cleanupConnections();
       AppLogger.instance.log('[SSH][$arg] connect failed: $e');
       state = state.copyWith(
         status: ConnectionStatus.disconnected,
@@ -201,7 +204,9 @@ class TerminalConnectionNotifier
 
     final session = await _channelManager!.openPtyChannel();
 
+    _shellOutputReceived = false;
     _stdoutSubscription = session.stdout.listen((data) {
+      _shellOutputReceived = true;
       _outputBuffer.write(utf8.decode(data, allowMalformed: true));
       _flushTimer ??= Timer(
         const Duration(milliseconds: 16),
@@ -230,51 +235,69 @@ class TerminalConnectionNotifier
   }
 
   void _onDisconnected() {
-    if (state.status == ConnectionStatus.reconnecting) return;
+    // 既に切断済み・接続中なら何もしない
     if (state.status == ConnectionStatus.disconnected) return;
     if (state.status == ConnectionStatus.connecting) return;
-    AppLogger.instance.log('[SSH][$arg] disconnected, attempting silent reconnect');
-    _lastAliveConfirmed = null;
-    _keepAliveFailCount = 0;
-    if (_config != null) {
-      _silentReconnect();
-    } else {
-      state = state.copyWith(
-        status: ConnectionStatus.disconnected,
-        errorMessage: 'Connection lost',
-        clearChannelManager: true,
-      );
+    if (_isReconnecting) {
+      AppLogger.instance.log('[SSH][$arg] disconnect during reconnect, ignoring');
+      return;
     }
+
+    AppLogger.instance.log('[SSH][$arg] disconnected');
+    _keepAliveFailCount = 0;
+    _cleanupConnections();
+
+    // ターミナルは保持したまま disconnected に遷移
+    state = state.copyWith(
+      status: ConnectionStatus.disconnected,
+      clearChannelManager: true,
+    );
+
+    // 自動再接続を試みる
+    _scheduleReconnect();
   }
 
-  /// 赤バナーを出さずに即座に再接続を試みる。
-  /// reconnecting 状態に遷移してスピナーのみ表示。
-  /// 失敗した場合のみ disconnected + エラーバナーを表示する。
-  Future<void> _silentReconnect() async {
-    if (_config == null) {
-      state = state.copyWith(
-        status: ConnectionStatus.disconnected,
-        errorMessage: 'Connection lost',
-        clearChannelManager: true,
-      );
-      return;
-    }
-    if (state.status == ConnectionStatus.reconnecting ||
-        state.status == ConnectionStatus.connecting ||
-        state.status == ConnectionStatus.connected) {
-      return;
-    }
+  /// 自動再接続をスケジュールする。指数バックオフ (3s, 6s, 12s, 24s, 30s, 30s, ...)。
+  /// リトライ回数に上限はなく、接続が復活するまで試行し続ける。
+  void _scheduleReconnect() {
+    if (_config == null) return;
 
+    _retryCount++;
+    // 指数バックオフ: 3s → 6s → 12s → 24s → 30s（上限）
+    final delaySec = (3 * (1 << (_retryCount - 1))).clamp(3, 30);
+    final delay = Duration(seconds: delaySec);
+    AppLogger.instance.log('[SSH][$arg] scheduling reconnect #$_retryCount in ${delay.inSeconds}s');
+
+    state = state.copyWith(
+      status: ConnectionStatus.disconnected,
+      errorMessage: 'Reconnecting in ${delay.inSeconds}s... (attempt #$_retryCount)',
+    );
+
+    _retryTimer?.cancel();
+    _retryTimer = Timer(delay, () {
+      _attemptReconnect();
+    });
+  }
+
+  /// 再接続を 1 回試みる。成功時は tmux リアタッチも行う。
+  Future<void> _attemptReconnect() async {
+    if (_config == null) return;
+    if (_isReconnecting) return;
+    if (state.status == ConnectionStatus.connected) return;
+
+    _isReconnecting = true;
     final existingTerminal = state.terminal;
+
     state = state.copyWith(
       status: ConnectionStatus.reconnecting,
       clearChannelManager: true,
     );
 
+    // 古い接続がまだ残っている場合に備えてクリーンアップ
     _cleanupConnections();
-    await Future.delayed(const Duration(milliseconds: 500));
 
     try {
+      AppLogger.instance.log('[SSH][$arg] reconnecting...');
       final terminal = await _connectCore(
         config: _config!,
         password: _password,
@@ -282,75 +305,84 @@ class TerminalConnectionNotifier
         passphrase: _passphrase,
         existingTerminal: existingTerminal,
       );
-      AppLogger.instance.log('[SSH][$arg] silent reconnect succeeded');
+
+      AppLogger.instance.log('[SSH][$arg] reconnected successfully');
       if (existingTerminal != null) {
         terminal.write('\r\n\x1B[33m--- Reconnected ---\x1B[0m\r\n');
       }
       _retryCount = 0;
-      _lastReconnectAttempt = null;
-      _lastAliveConfirmed = DateTime.now();
       _keepAliveFailCount = 0;
       state = state.copyWith(
         status: ConnectionStatus.connected,
         terminal: terminal,
         channelManager: _channelManager,
       );
-      _startHealthCheck();
-      // tmux タブの場合は自動リアタッチ
       _autoReattachTmux(terminal);
     } catch (e) {
-      AppLogger.instance.log('[SSH][$arg] silent reconnect failed: $e');
+      AppLogger.instance.log('[SSH][$arg] reconnect failed: $e');
       state = state.copyWith(
         status: ConnectionStatus.disconnected,
         terminal: existingTerminal,
         errorMessage: e.toString(),
         clearChannelManager: true,
       );
-      if (_retryCount < _maxRetries) {
-        _retryCount++;
-        final delay = Duration(seconds: 1 << _retryCount);
-        _retryTimer?.cancel();
-        _retryTimer = Timer(delay, () {
-          reconnect(isAutoRetry: true);
-        });
-      }
+      // 次のリトライをスケジュール
+      _scheduleReconnect();
+    } finally {
+      _isReconnecting = false;
     }
   }
 
   /// tmux タブの場合、再接続後に自動で tmux セッションにリアタッチする。
+  /// PTY の stdout からデータを受信するまで待機してからコマンドを送信する。
+  /// これによりシェルの初期化（.bashrc 等）が完了してから attach する。
   void _autoReattachTmux(Terminal terminal) {
     if (_tmuxSessionName == null) return;
     AppLogger.instance.log('[SSH][$arg] auto-reattach tmux: $_tmuxSessionName');
-    final escaped = _tmuxSessionName!.replaceAll("'", r"'\''");
-    // 少し待ってからアタッチ（シェルの起動を待つ）
-    Future.delayed(const Duration(milliseconds: 500), () {
-      terminal.textInput("tmux attach -t '$escaped'\r");
-    });
+    final cmd = 'tmux attach -t ${shellQuote(_tmuxSessionName!)}\r';
+
+    // シェルが ready（stdout に何か出力した）になるまで待機してからコマンドを送信。
+    unawaited(waitForShellReady().then((_) async {
+      AppLogger.instance.log(
+          '[SSH][$arg] sending tmux attach (shellReady=$_shellOutputReceived)');
+      terminal.textInput(cmd);
+
+      // tmux attach 後、PTY のウィンドウサイズを再送信する。
+      // 再接続時は PTY が新規作成されるため、tmux が認識しているサイズと
+      // 実際の端末サイズが不一致になり表示が崩れる。
+      // 少し待ってから現在のサイズを送ることで tmux に再描画させる。
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      final w = terminal.viewWidth;
+      final h = terminal.viewHeight;
+      if (w > 0 && h > 0) {
+        _channelManager?.resizePty(w, h);
+        AppLogger.instance.log('[SSH][$arg] resized PTY after tmux attach: ${w}x$h');
+      }
+    }));
   }
 
-  void _startHealthCheck() {
-    _healthCheckTimer?.cancel();
-    _healthCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      lightHealthCheck();
-    });
-  }
+  /// シェルが stdout に何か出力したかどうか。
+  /// tmux attach のタイミング判定に使用。
+  bool get shellOutputReceived => _shellOutputReceived;
 
-  /// 軽量ヘルスチェック。isConnected フラグのみで判定し、
-  /// exec チャネルを開くような重い操作は行わない。
-  /// フォアグラウンドサービスの keepalive 受信時に呼ばれる。
-  void lightHealthCheck() {
-    // 接続中でなければ何もしない
-    if (state.status != ConnectionStatus.connected) return;
-    // isConnected が false なら切断を検知
-    if (_sshService == null || !_sshService!.isConnected) {
-      _onDisconnected();
+  /// シェルが ready（stdout に何か出力した）になるまで待機する。
+  /// 最小 [_shellReadyInitialDelay] + 最大 [_shellReadyMaxPolls] × [_shellReadyPollInterval] ≈ 5 秒。
+  /// 接続が切れた場合は即座に返る。
+  Future<void> waitForShellReady() async {
+    await Future<void>.delayed(_shellReadyInitialDelay);
+    for (var i = 0; i < _shellReadyMaxPolls; i++) {
+      if (_shellOutputReceived) break;
+      if (!(_sshService?.isConnected ?? false)) break;
+      await Future<void>.delayed(_shellReadyPollInterval);
     }
   }
 
+  @visibleForTesting
+  void markShellReadyForTesting() => _shellOutputReceived = true;
+
   /// フォアグラウンドサービスの keepalive 受信時に呼ばれる。
-  /// SSH 接続に軽量なコマンドを送信して接続を維持する。
+  /// SSH exec チャネルで軽量コマンドを送信して接続を維持する。
   Future<void> activeKeepAlive() async {
-    // unawaited で呼ばれるため重複実行を防ぐ
     if (_isActiveKeepAliveRunning) return;
     _isActiveKeepAliveRunning = true;
     try {
@@ -361,199 +393,105 @@ class TerminalConnectionNotifier
   }
 
   Future<void> _activeKeepAliveCore() async {
-    if (state.status == ConnectionStatus.connected) {
-      final service = _sshService;
-      if (service == null) return;
-      final alive = await service.keepAlive();
-      // await 中にサービスが差し替わった場合はタイムスタンプを更新しない
-      if (alive && identical(service, _sshService) &&
-          state.status == ConnectionStatus.connected) {
-        _lastAliveConfirmed = DateTime.now();
-        _keepAliveFailCount = 0;
-      } else if (!alive && identical(service, _sshService)) {
-        // 1〜2 回の失敗では再接続しない。一時的なネットワーク遅延を吸収する。
-        // keepalive は 10 秒ごとに実行されるため、連続 3 回失敗（30 秒間応答なし）
-        // で切断と判定する。
-        // identical チェック: await 中に reconnect() で _sshService が差し替わった場合、
-        // 古いサービスの失敗を新しい接続のカウンタに加算しない。
-        _keepAliveFailCount++;
-        AppLogger.instance.log('[SSH][$arg] keepalive FAILED ($_keepAliveFailCount)');
-        if (_keepAliveFailCount >= 3) {
-          _keepAliveFailCount = 0;
-          AppLogger.instance.log('[SSH][$arg] keepalive failed 3 times, silent reconnect');
-          _silentReconnect();
-        }
-      }
-      return;
-    }
+    if (state.status != ConnectionStatus.connected) return;
+    final service = _sshService;
+    if (service == null) return;
 
-    // disconnected 状態: リトライが尽きた後も定期的に再接続を試みる
-    // 自動リトライのバックオフ中（_retryTimer が動いている）は干渉しない
-    if (state.status == ConnectionStatus.disconnected &&
-        _config != null &&
-        _retryTimer == null &&
-        _retryCount >= _maxRetries) {
-      final now = DateTime.now();
-      if (_lastReconnectAttempt != null &&
-          now.difference(_lastReconnectAttempt!) <
-              const Duration(seconds: 60)) {
-        return;
+    final alive = await service.keepAlive();
+
+    // await 中にサービスが差し替わった場合は無視
+    if (!identical(service, _sshService)) return;
+    if (state.status != ConnectionStatus.connected) return;
+
+    if (alive) {
+      _keepAliveFailCount = 0;
+    } else {
+      _keepAliveFailCount++;
+      AppLogger.instance.log('[SSH][$arg] keepalive failed ($_keepAliveFailCount/3)');
+      if (_keepAliveFailCount >= 3) {
+        AppLogger.instance.log('[SSH][$arg] keepalive failed 3 times, disconnecting');
+        _keepAliveFailCount = 0;
+        _onDisconnected();
       }
-      _lastReconnectAttempt = now;
-      _retryCount = 0;
-      await reconnect();
     }
   }
 
+  /// アプリ復帰時に呼ばれる。接続状態を確認し、必要に応じて再接続する。
   Future<void> checkConnection() async {
-    // レース条件ガード: 既に checkConnection が実行中なら何もしない
-    if (_isCheckingConnection) return;
-    // 既に再接続中・接続中なら何もしない
+    if (_isReconnecting) return;
     if (state.status == ConnectionStatus.reconnecting) return;
     if (state.status == ConnectionStatus.connecting) return;
-    // config がない（一度も接続していない）なら何もしない
     if (_config == null) return;
 
-    _isCheckingConnection = true;
-    try {
-      // ケース B: バックグラウンド中に _onDisconnected() で disconnected になった場合
-      // → 自動再接続を試みる（バナーが出ていても再接続）
-      if (state.status == ConnectionStatus.disconnected) {
-        await reconnect();
-        return;
-      }
-
-      // ケース A: state が connected — 本当に生きているか確認
-      if (_sshService != null && _sshService!.isConnected) {
-        // 最後の確認から 45 秒以内なら probe をスキップ。
-        // activeKeepAlive() が 30 秒ごとに _lastAliveConfirmed を更新するため、
-        // 45 秒窓なら直近の keepalive 成功をカバーできる。
-        if (_lastAliveConfirmed != null &&
-            DateTime.now().difference(_lastAliveConfirmed!) <
-                const Duration(seconds: 45)) {
-          return;
-        }
-
-        // keepAlive() で生存確認。失敗した場合は 1 秒待ってリトライする。
-        // バックグラウンド復帰直後は Wi-Fi が省電力モードから復帰するまで
-        // 数秒かかるため、1 回の失敗で即座に再接続しない。
-        final service = _sshService!;
-        for (var attempt = 0; attempt < 2; attempt++) {
-          try {
-            final alive = await service.keepAlive(
-              executeTimeout: const Duration(seconds: 10),
-              doneTimeout: const Duration(seconds: 10),
-            );
-            if (alive && identical(service, _sshService)) {
-              _lastAliveConfirmed = DateTime.now();
-              return; // 生きている
-            }
-          } catch (_) {
-            // keepAlive 失敗
-          }
-          // 1 回目の失敗: Wi-Fi 復帰を待ってリトライ
-          if (attempt == 0) {
-            await Future.delayed(const Duration(seconds: 1));
-            // 遅延中に状態が変わっていたら中断
-            if (!identical(service, _sshService)) return;
-          }
-        }
-      }
-
-      AppLogger.instance.log('[SSH][$arg] zombie connection, silent reconnect');
-      await _silentReconnect();
-    } finally {
-      _isCheckingConnection = false;
-    }
-  }
-
-  Future<void> reconnect({bool isAutoRetry = false}) async {
-    if (_config == null) return;
-    // 既に接続中・再接続中・接続済みなら何もしない
-    if (state.status == ConnectionStatus.connecting ||
-        state.status == ConnectionStatus.reconnecting ||
-        state.status == ConnectionStatus.connected) {
+    // ケース 1: 既に disconnected → 再接続を試みる
+    if (state.status == ConnectionStatus.disconnected) {
+      AppLogger.instance.log('[SSH][$arg] app resumed, reconnecting (was disconnected)');
+      _retryCount = 0; // app resume 時はリトライカウンタをリセット
+      _retryTimer?.cancel();
+      await _attemptReconnect();
       return;
     }
 
-    // 手動リトライの場合はカウンタをリセット
-    if (!isAutoRetry) {
-      _retryCount = 0;
-      _retryTimer?.cancel();
-      _retryTimer = null;
-    }
-
-    final existingTerminal = state.terminal;
-    // UI に再接続中を表示
-    state = state.copyWith(status: ConnectionStatus.reconnecting);
-
-    // 古い接続を確実にクリーンアップ
-    _cleanupConnections();
-    // サーバーが古い接続を認識解除するまで少し待つ
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    try {
-      final terminal = await _connectCore(
-        config: _config!,
-        password: _password,
-        privateKeyPem: _privateKeyPem,
-        passphrase: _passphrase,
-        existingTerminal: existingTerminal,
-      );
-      AppLogger.instance.log('[SSH][$arg] reconnect succeeded');
-      if (existingTerminal != null) {
-        terminal.write('\r\n\x1B[33m--- Reconnected ---\x1B[0m\r\n');
+    // ケース 2: connected → keepAlive で生存確認
+    if (state.status == ConnectionStatus.connected) {
+      final service = _sshService;
+      if (service == null) {
+        _onDisconnected();
+        return;
       }
-      _retryCount = 0;
-      _lastReconnectAttempt = null;
-      _lastAliveConfirmed = DateTime.now();
-      _keepAliveFailCount = 0;
-      state = state.copyWith(
-        status: ConnectionStatus.connected,
-        terminal: terminal,
-        channelManager: _channelManager,
-      );
-      _startHealthCheck();
-      // tmux タブの場合は自動リアタッチ
-      _autoReattachTmux(terminal);
-    } catch (e) {
-      AppLogger.instance.log('[SSH][$arg] reconnect failed: $e');
-      state = state.copyWith(
-        status: ConnectionStatus.disconnected,
-        terminal: existingTerminal,
-        errorMessage: e.toString(),
-        clearChannelManager: true,
-      );
-      // 自動リトライ: 最大3回、指数バックオフ（2s, 4s, 8s）
-      if (_retryCount < _maxRetries) {
-        _retryCount++;
-        final delay = Duration(seconds: 1 << _retryCount); // 2, 4, 8
-        _retryTimer?.cancel();
-        _retryTimer = Timer(delay, () {
-          reconnect(isAutoRetry: true);
-        });
+
+      // keepAlive probe（最大 2 回、Wi-Fi 復帰を待つ）
+      for (var attempt = 0; attempt < 2; attempt++) {
+        final alive = await service.keepAlive(
+          executeTimeout: const Duration(seconds: 5),
+          doneTimeout: const Duration(seconds: 5),
+        );
+        if (!identical(service, _sshService)) return; // 差し替わった
+        if (alive) return; // 生きている
+
+        // 1 回目の失敗: 1 秒待ってリトライ
+        if (attempt == 0) {
+          await Future.delayed(const Duration(seconds: 1));
+          if (!identical(service, _sshService)) return;
+        }
       }
+
+      // 2 回とも失敗 → 切断
+      AppLogger.instance.log('[SSH][$arg] app resumed, connection dead, reconnecting');
+      _onDisconnected();
     }
+  }
+
+  /// 手動の「Reconnect」ボタンから呼ばれる。リトライカウンタをリセットして再接続。
+  Future<void> reconnect() async {
+    if (_config == null) return;
+    if (_isReconnecting) return;
+    AppLogger.instance.log('[SSH][$arg] manual reconnect requested');
+    _retryCount = 0;
+    _retryTimer?.cancel();
+    await _attemptReconnect();
   }
 
   /// テスト専用: SSH サービスインスタンスと接続状態を直接設定する。
-  /// 実際の SSH 接続を確立せずに keepAlive 挙動をテストするために使用する。
+  /// 実際の SSH 接続を確立せずに keepAlive / checkConnection 挙動をテストするために使用する。
+  /// [config] を指定すると _config も設定され、checkConnection() の config ガードを通過できる。
   @visibleForTesting
   void initConnectedStateForTesting({
     required SshClientService sshService,
     required TerminalConnectionState connectedState,
+    ConnectionConfig? config,
   }) {
     _sshService = sshService;
     _keepAliveFailCount = 0;
+    if (config != null) _config = config;
     state = connectedState;
   }
 
   /// Cancels SSH subscriptions and disposes resources without clearing state.
   void _cleanupConnections() {
-    _lastAliveConfirmed = null;
+    AppLogger.instance.log('[SSH][$arg] cleaning up connections');
     _keepAliveFailCount = 0;
-    _healthCheckTimer?.cancel();
-    _healthCheckTimer = null;
+    _shellOutputReceived = false;
     _flushTimer?.cancel();
     _flushTimer = null;
     _outputBuffer.clear();

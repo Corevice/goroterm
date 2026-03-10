@@ -269,8 +269,8 @@ class _RepeatableActionButtonState extends State<_RepeatableActionButton> {
 
   // 水平スクロール判定の閾値（px）
   static const _scrollThreshold = 8.0;
-  // ボタン押下と判定するまでの遅延
-  static const _activationDelay = Duration(milliseconds: 150);
+  // ボタン押下と判定するまでの遅延（長押しリピート開始）
+  static const _activationDelay = Duration(milliseconds: 80);
 
   void _onPointerDown(PointerDownEvent event) {
     _downPosition = event.position;
@@ -316,11 +316,18 @@ class _RepeatableActionButtonState extends State<_RepeatableActionButton> {
   }
 
   void _stopRepeat() {
+    final wasPendingActivation = _activationTimer?.isActive ?? false;
     _activationTimer?.cancel();
     _activationTimer = null;
     _repeatTimer?.cancel();
     _repeatTimer = null;
     _downPosition = null;
+    // タイマー発火前の短いタップでも 1 回キー送信する。
+    // _isCancelled（スクロール操作）の場合は送信しない。
+    // _isPressed が false = まだ _startRepeat が呼ばれていない = タップが短い
+    if (wasPendingActivation && !_isCancelled && !_isPressed && mounted) {
+      widget.onPressed();
+    }
     if (mounted) {
       setState(() => _isPressed = false);
     }

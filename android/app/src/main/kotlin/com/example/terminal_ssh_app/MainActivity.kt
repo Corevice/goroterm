@@ -48,6 +48,56 @@ class MainActivity : FlutterActivity() {
             }
     }
 
+    /// 重複しないファイルパスを返す。
+    /// 例: "file.txt" が存在する場合 → "file (1).txt", "file (2).txt", ...
+    private fun uniqueFile(dir: File, fileName: String): File {
+        var candidate = File(dir, fileName)
+        if (!candidate.exists()) return candidate
+
+        val dotIdx = fileName.lastIndexOf('.')
+        val baseName = if (dotIdx > 0) fileName.substring(0, dotIdx) else fileName
+        val ext = if (dotIdx > 0) fileName.substring(dotIdx) else ""
+
+        var counter = 1
+        while (true) {
+            candidate = File(dir, "$baseName ($counter)$ext")
+            if (!candidate.exists()) return candidate
+            counter++
+        }
+    }
+
+    /// MediaStore の Downloads 内で重複しないファイル名を返す。
+    /// 例: "file.txt" が存在する場合 → "file (1).txt", "file (2).txt", ...
+    /// 拡張子は変更しない。
+    private fun uniqueMediaStoreName(fileName: String): String {
+        val resolver = contentResolver
+        val dotIdx = fileName.lastIndexOf('.')
+        val baseName = if (dotIdx > 0) fileName.substring(0, dotIdx) else fileName
+        val ext = if (dotIdx > 0) fileName.substring(dotIdx) else ""
+
+        // まず元のファイル名が存在するかチェック
+        if (!mediaStoreFileExists(fileName)) return fileName
+
+        var counter = 1
+        while (true) {
+            val candidate = "$baseName ($counter)$ext"
+            if (!mediaStoreFileExists(candidate)) return candidate
+            counter++
+        }
+    }
+
+    /// Downloads ディレクトリ内に指定ファイル名が存在するかチェック
+    private fun mediaStoreFileExists(fileName: String): Boolean {
+        val resolver = contentResolver
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+        val selectionArgs = arrayOf(fileName, "${Environment.DIRECTORY_DOWNLOADS}/")
+        return resolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            projection, selection, selectionArgs, null
+        )?.use { cursor -> cursor.count > 0 } ?: false
+    }
+
     private suspend fun saveToDownloads(sourcePath: String, fileName: String, mimeType: String): String {
         return withContext(Dispatchers.IO) {
             val sourceFile = File(sourcePath)
@@ -55,13 +105,16 @@ class MainActivity : FlutterActivity() {
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // Android 10+ : MediaStore API
+                // MediaStore の自動リネームは拡張子の後ろに番号を付ける場合があるため、
+                // 自前で重複チェックして拡張子の前に番号を付ける
+                val resolver = contentResolver
+                val uniqueName = uniqueMediaStoreName(fileName)
                 val contentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, uniqueName)
                     put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                     put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
-                val resolver = contentResolver
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
                     ?: throw IllegalStateException("Failed to create MediaStore entry")
                 try {
@@ -80,7 +133,7 @@ class MainActivity : FlutterActivity() {
                 }
                 // 一時ファイルを削除
                 sourceFile.delete()
-                fileName // URI ではなくファイル名を返す（UI 表示用）
+                uniqueName
             } else {
                 // Android 9 以下: 直接 Downloads ディレクトリにコピー
                 @Suppress("DEPRECATION")
@@ -88,10 +141,10 @@ class MainActivity : FlutterActivity() {
                     Environment.DIRECTORY_DOWNLOADS
                 )
                 downloadsDir.mkdirs()
-                val destFile = File(downloadsDir, fileName)
-                sourceFile.copyTo(destFile, overwrite = true)
+                val destFile = uniqueFile(downloadsDir, fileName)
+                sourceFile.copyTo(destFile, overwrite = false)
                 sourceFile.delete()
-                destFile.absolutePath
+                destFile.name
             }
         }
     }

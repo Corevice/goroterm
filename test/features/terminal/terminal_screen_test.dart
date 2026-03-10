@@ -126,7 +126,7 @@ void main() {
       await tester.pumpWidget(_buildScreen(_DisconnectedNotifier.new));
       await tester.pump();
       expect(find.text('Connection lost'), findsOneWidget);
-      expect(find.text('Reconnect'), findsOneWidget);
+      expect(find.text('Reconnect Now'), findsOneWidget);
     });
 
     testWidgets('AppBar has folder_open icon for file browser', (tester) async {

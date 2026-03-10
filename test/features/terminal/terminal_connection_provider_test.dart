@@ -5,6 +5,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:xterm/xterm.dart';
 
 import 'package:terminal_ssh_app/core/network/connectivity_monitor.dart';
+import 'package:terminal_ssh_app/core/ssh/connection_config.dart';
 import 'package:terminal_ssh_app/core/ssh/known_hosts_store.dart';
 import 'package:terminal_ssh_app/core/ssh/ssh_client_service.dart';
 import 'package:terminal_ssh_app/features/terminal/terminal_connection_provider.dart';
@@ -46,6 +47,29 @@ class _FakeSshClientService extends SshClientService {
   void disconnect() {
     // no-op: no real client to close
   }
+}
+
+/// Fake SSH service that always reports disconnected — used to test early exit.
+class _FakeDisconnectedSshClientService extends SshClientService {
+  _FakeDisconnectedSshClientService()
+      : super(
+          knownHostsStore: KnownHostsStore(
+            storage: _MockFlutterSecureStorage(),
+          ),
+        );
+
+  @override
+  bool get isConnected => false;
+
+  @override
+  Future<bool> keepAlive({
+    Duration executeTimeout = const Duration(seconds: 5),
+    Duration doneTimeout = const Duration(seconds: 5),
+  }) async =>
+      false;
+
+  @override
+  void disconnect() {}
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +500,17 @@ void main() {
       );
     });
 
+    test('status is disconnected after 3 keepAlive failures', () async {
+      fakeService.keepAliveResult = false;
+      await notifier.activeKeepAlive();
+      await notifier.activeKeepAlive();
+      await notifier.activeKeepAlive();
+      expect(
+        container.read(terminalConnectionProvider('ka-test')).status,
+        ConnectionStatus.disconnected,
+      );
+    });
+
     test('service swap during await does not pollute new connection count',
         () async {
       // Simulate: old service fails, but _sshService was replaced (reconnect).
@@ -516,6 +551,189 @@ void main() {
         container.read(terminalConnectionProvider('ka-test')).status,
         ConnectionStatus.connected,
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // checkConnection() — connected path (keepAlive probe)
+  //
+  // When status is connected, checkConnection() sends up to 2 keepAlive probes.
+  // Both succeeding → stays connected. Both failing → calls _onDisconnected().
+  // status == connecting → early return without any probe.
+  // -------------------------------------------------------------------------
+
+  group('checkConnection() connected path', () {
+    late ProviderContainer container;
+    late TerminalConnectionNotifier notifier;
+    late _FakeSshClientService fakeService;
+
+    setUp(() {
+      container = makeContainer();
+      notifier = container.read(
+        terminalConnectionProvider('cc-conn-test').notifier,
+      );
+      fakeService = _FakeSshClientService();
+    });
+
+    tearDown(() => container.dispose());
+
+    test('checkConnection returns early when status is connecting', () async {
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connecting,
+          hostLabel: 'test-host',
+        ),
+      );
+
+      await notifier.checkConnection();
+
+      expect(
+        container.read(terminalConnectionProvider('cc-conn-test')).status,
+        ConnectionStatus.connecting,
+      );
+    });
+
+    test('checkConnection does nothing when connected and keepAlive succeeds',
+        () async {
+      fakeService.keepAliveResult = true;
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+        config: const ConnectionConfig(
+          label: 'test', host: '127.0.0.1', username: 'u',
+        ),
+      );
+
+      await notifier.checkConnection();
+
+      expect(
+        container.read(terminalConnectionProvider('cc-conn-test')).status,
+        ConnectionStatus.connected,
+      );
+    });
+
+    test('checkConnection disconnects when both keepAlive probes fail',
+        () async {
+      fakeService.keepAliveResult = false;
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+        config: const ConnectionConfig(
+          label: 'test', host: '127.0.0.1', username: 'u',
+        ),
+      );
+
+      // Two failing probes (with ~1s delay between them in production code).
+      await notifier.checkConnection();
+
+      expect(
+        container.read(terminalConnectionProvider('cc-conn-test')).status,
+        ConnectionStatus.disconnected,
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // checkConnection() — reconnecting guard (Phase 41)
+  // -------------------------------------------------------------------------
+
+  group('checkConnection() reconnecting guard', () {
+    late ProviderContainer container;
+    late TerminalConnectionNotifier notifier;
+    late _FakeSshClientService fakeService;
+
+    setUp(() {
+      container = makeContainer();
+      notifier = container.read(
+        terminalConnectionProvider('rc-test').notifier,
+      );
+      fakeService = _FakeSshClientService();
+    });
+
+    tearDown(() => container.dispose());
+
+    // checkConnection() must return early when status is reconnecting,
+    // preventing a race with an in-progress _attemptReconnect.
+    test('checkConnection returns early when status is reconnecting', () async {
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.reconnecting,
+          hostLabel: 'test-host',
+        ),
+      );
+
+      await notifier.checkConnection();
+
+      expect(
+        container.read(terminalConnectionProvider('rc-test')).status,
+        ConnectionStatus.reconnecting,
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // waitForShellReady()
+  // ---------------------------------------------------------------------------
+
+  group('waitForShellReady()', () {
+    late ProviderContainer container;
+    late TerminalConnectionNotifier notifier;
+    late _FakeSshClientService fakeService;
+
+    setUp(() {
+      container = makeContainer();
+      notifier = container.read(
+        terminalConnectionProvider('ws-test').notifier,
+      );
+      fakeService = _FakeSshClientService();
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+      );
+    });
+
+    tearDown(() => container.dispose());
+
+    test('returns promptly when shell is already ready', () async {
+      notifier.markShellReadyForTesting();
+
+      final sw = Stopwatch()..start();
+      await notifier.waitForShellReady();
+      sw.stop();
+
+      // 初期 300ms + 最初のポーリング前に break するので、合計 400ms 未満で返る。
+      expect(sw.elapsedMilliseconds, lessThan(600));
+      expect(notifier.shellOutputReceived, isTrue);
+    });
+
+    test('returns promptly when SSH disconnects mid-wait', () async {
+      // isConnected が false を返す fake
+      final disconnectedFake = _FakeDisconnectedSshClientService();
+      notifier.initConnectedStateForTesting(
+        sshService: disconnectedFake,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+      );
+
+      final sw = Stopwatch()..start();
+      await notifier.waitForShellReady();
+      sw.stop();
+
+      // isConnected=false なので最初のポーリングで break → 300ms + わずか。
+      expect(sw.elapsedMilliseconds, lessThan(600));
     });
   });
 }

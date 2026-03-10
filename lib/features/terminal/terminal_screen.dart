@@ -23,8 +23,10 @@ import '../file_browser/file_browser_screen.dart';
 import '../tmux/tmux_manager_screen.dart';
 import '../tmux/tmux_provider.dart';
 import '../../widgets/quick_action_bar.dart';
-import '../../widgets/terminal_scroll_interceptor.dart';
 import '../../core/utils/app_logger.dart';
+import '../../core/utils/shell_utils.dart';
+import '../../widgets/terminal_scroll_interceptor.dart';
+import '../claude_usage/claude_usage_dialog.dart';
 import '../../widgets/terminal_selection_toolbar.dart';
 
 /// Multi-session terminal screen. Manages tabs via [SessionManagerNotifier].
@@ -38,6 +40,7 @@ class TerminalScreen extends ConsumerStatefulWidget {
 class _TerminalScreenState extends ConsumerState<TerminalScreen>
     with WidgetsBindingObserver {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+  final _drawerClosedNotifier = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -53,6 +56,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     WidgetsBinding.instance.removeObserver(this);
+    _drawerClosedNotifier.dispose();
     super.dispose();
   }
 
@@ -148,39 +152,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   }
 
   void _scheduleCleanupCheck(int attempt) {
-    if (attempt >= 18) return; // 最大 90 秒で打ち切り
-    Future.delayed(const Duration(seconds: 5), () {
-      if (!mounted) return;
-      final managerState = ref.read(sessionManagerProvider);
-      if (managerState.sessions.isEmpty) return;
-
-      // まだ再接続中のセッションがあれば待機
-      final hasReconnecting = managerState.sessions.any((session) {
-        final connState =
-            ref.read(terminalConnectionProvider(session.sessionId));
-        return connState.status == ConnectionStatus.reconnecting ||
-            connState.status == ConnectionStatus.connecting;
-      });
-
-      if (hasReconnecting) {
-        _scheduleCleanupCheck(attempt + 1);
-        return;
-      }
-
-      // 全セッションが disconnected なら全タブを閉じる
-      final allDisconnected = managerState.sessions.every((session) {
-        final connState =
-            ref.read(terminalConnectionProvider(session.sessionId));
-        return connState.status == ConnectionStatus.disconnected;
-      });
-
-      if (allDisconnected) {
-        final manager = ref.read(sessionManagerProvider.notifier);
-        for (final session in [...managerState.sessions]) {
-          manager.removeSession(session.sessionId);
-        }
-      }
-    });
+    // 再接続が試行されるため、自動でタブを閉じない。
+    // ユーザーが手動でタブを閉じるか、接続画面に戻ることで対応する。
   }
 
   Future<void> _showConnectionPicker(BuildContext context, WidgetRef ref) async {
@@ -310,6 +283,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           notifier.startAutoRefresh();
         } else {
           notifier.stopAutoRefresh();
+          // ドロワーが閉じたらアクティブタブのフォーカス復帰を通知
+          _drawerClosedNotifier.value++;
         }
       },
       appBar: AppBar(
@@ -343,6 +318,26 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             icon: const Icon(Icons.add),
             tooltip: 'New terminal tab',
             onPressed: () => _showConnectionPicker(context, ref),
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'claude_usage') {
+                ClaudeUsageDialog.show(context, activeSession.sessionId);
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'claude_usage',
+                child: Row(
+                  children: [
+                    Icon(Icons.analytics_outlined, size: 20),
+                    SizedBox(width: 12),
+                    Text('Claude Code Usage'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
         // Show tab strip below title (always visible so the current tab name is shown)
@@ -391,6 +386,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                     connectionId: s.connectionId,
                     isActive: s.sessionId == activeSession.sessionId,
                     tmuxSessionName: s.tmuxSessionName,
+                    drawerClosedNotifier: _drawerClosedNotifier,
                   ))
               .toList(),
         ),
@@ -474,6 +470,7 @@ class _TerminalTabContent extends ConsumerStatefulWidget {
     required this.connectionId,
     required this.isActive,
     this.tmuxSessionName,
+    this.drawerClosedNotifier,
   });
 
   final String sessionId;
@@ -482,6 +479,9 @@ class _TerminalTabContent extends ConsumerStatefulWidget {
 
   /// If set, automatically runs `tmux attach -t <name>` once connected.
   final String? tmuxSessionName;
+
+  /// ドロワーが閉じたことを通知する。フォーカス復帰に使用。
+  final ValueNotifier<int>? drawerClosedNotifier;
 
   @override
   ConsumerState<_TerminalTabContent> createState() =>
@@ -506,6 +506,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     super.initState();
     // ref.listenManual は initState 内で一度だけ登録（rebuild で再登録されない）
     _terminalController.addListener(_onSelectionChanged);
+    widget.drawerClosedNotifier?.addListener(_onDrawerClosed);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _channelManagerSubscription = ref.listenManual(
@@ -545,6 +546,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
   @override
   void dispose() {
     _terminalController.removeListener(_onSelectionChanged);
+    widget.drawerClosedNotifier?.removeListener(_onDrawerClosed);
     _toolbarAutoHideTimer?.cancel();
     _hideToolbar();
     _channelManagerSubscription?.close();
@@ -552,6 +554,17 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     _focusNode.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onDrawerClosed() {
+    // ドロワーが閉じた後、アクティブタブならフォーカスを要求。
+    // ドロワーのアニメーション完了後（300ms）にフォーカスを取る。
+    if (!widget.isActive) return;
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted && widget.isActive) {
+        _focusNode.requestFocus();
+      }
+    });
   }
 
   void _onSelectionChanged() {
@@ -688,6 +701,18 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
           conn.authMethod == 'key' ? AuthMethod.key : AuthMethod.password,
     );
 
+    // ダウンロード用 Isolate のための接続情報を設定
+    ref
+        .read(fileBrowserProvider(widget.sessionId).notifier)
+        .setConnectionCredentials(
+          host: conn.host,
+          port: conn.port,
+          username: conn.username,
+          password: password,
+          privateKeyPem: privateKeyPem,
+          passphrase: passphrase,
+        );
+
     await ref
         .read(terminalConnectionProvider(widget.sessionId).notifier)
         .connect(
@@ -700,13 +725,15 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
 
     // Auto-attach tmux session after connection is established.
     if (widget.tmuxSessionName != null && mounted) {
-      await Future<void>.delayed(const Duration(milliseconds: 500));
+      final notifier =
+          ref.read(terminalConnectionProvider(widget.sessionId).notifier);
+      // シェルが ready になるまで待機（最小 300ms + 最大 5 秒）
+      await notifier.waitForShellReady();
+      if (!mounted) return;
       final terminal =
           ref.read(terminalConnectionProvider(widget.sessionId)).terminal;
       if (terminal != null) {
-        final escaped =
-            widget.tmuxSessionName!.replaceAll("'", r"'\''");
-        terminal.textInput("tmux attach -t '$escaped'\r");
+        terminal.textInput('tmux attach -t ${shellQuote(widget.tmuxSessionName!)}\r');
       }
     }
 
@@ -823,8 +850,23 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       children: [
         if (connectionState.status == ConnectionStatus.disconnected)
           MaterialBanner(
-            content: Text(
-              connectionState.errorMessage ?? 'Connection lost',
+            content: Row(
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white70,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    connectionState.errorMessage ?? 'Connection lost',
+                  ),
+                ),
+              ],
             ),
             backgroundColor: Colors.red[900],
             actions: [
@@ -832,7 +874,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
                 onPressed: () => ref
                     .read(terminalConnectionProvider(widget.sessionId).notifier)
                     .reconnect(),
-                child: const Text('Reconnect'),
+                child: const Text('Reconnect Now'),
               ),
             ],
           ),
@@ -841,6 +883,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
               ? ClipRect(
                   child: TerminalScrollInterceptor(
                     terminal: connectionState.terminal!,
+                    disabled: _isSelectMode,
                     child: TerminalView(
                       connectionState.terminal!,
                       controller: _terminalController,
