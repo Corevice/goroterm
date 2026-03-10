@@ -8,6 +8,7 @@ import 'package:xterm/xterm.dart';
 import '../../core/navigation/navigator_key.dart';
 import '../../core/ssh/connection_config.dart';
 import '../../core/ssh/ssh_client_service.dart';
+import '../../core/utils/app_logger.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/ssh/known_hosts_store.dart';
 import 'host_key_dialog.dart';
@@ -73,6 +74,7 @@ class TerminalConnectionNotifier
   DateTime? _lastAliveConfirmed;
   bool _isActiveKeepAliveRunning = false;
   int _keepAliveFailCount = 0;
+  String? _tmuxSessionName;
 
   // Batch output buffer: accumulates SSH stdout chunks and flushes every 16 ms
   // to reduce UI thread work during high-throughput output.
@@ -92,6 +94,7 @@ class TerminalConnectionNotifier
     String? password,
     String? privateKeyPem,
     String? passphrase,
+    String? tmuxSessionName,
   }) async {
     // 既に接続中または接続済みなら二重接続しない
     if (state.status == ConnectionStatus.connecting ||
@@ -99,6 +102,7 @@ class TerminalConnectionNotifier
       return;
     }
 
+    _tmuxSessionName = tmuxSessionName;
     _config = config;
     _password = password;
     _privateKeyPem = privateKeyPem;
@@ -117,6 +121,7 @@ class TerminalConnectionNotifier
         passphrase: passphrase,
       );
       _lastAliveConfirmed = DateTime.now();
+      AppLogger.instance.log('[SSH][$arg] connected');
       state = state.copyWith(
         status: ConnectionStatus.connected,
         terminal: terminal,
@@ -125,6 +130,7 @@ class TerminalConnectionNotifier
       _startHealthCheck();
     } catch (e) {
       _cleanupConnections(); // SSH クライアントとチャネルを確実に解放
+      AppLogger.instance.log('[SSH][$arg] connect failed: $e');
       state = state.copyWith(
         status: ConnectionStatus.disconnected,
         errorMessage: e.toString(),
@@ -207,6 +213,7 @@ class TerminalConnectionNotifier
     final currentClient = client;
     _doneSubscription = client.done.asStream().listen((_) {
       if (_sshService?.client == currentClient) {
+        AppLogger.instance.log('[SSH][$arg] client.done fired');
         _onDisconnected();
       }
     });
@@ -223,30 +230,102 @@ class TerminalConnectionNotifier
   }
 
   void _onDisconnected() {
-    // 再接続中なら無視（reconnect() が完了を処理する）
     if (state.status == ConnectionStatus.reconnecting) return;
-    // 既に切断状態なら無視
     if (state.status == ConnectionStatus.disconnected) return;
+    if (state.status == ConnectionStatus.connecting) return;
+    AppLogger.instance.log('[SSH][$arg] disconnected, attempting silent reconnect');
     _lastAliveConfirmed = null;
     _keepAliveFailCount = 0;
+    if (_config != null) {
+      _silentReconnect();
+    } else {
+      state = state.copyWith(
+        status: ConnectionStatus.disconnected,
+        errorMessage: 'Connection lost',
+        clearChannelManager: true,
+      );
+    }
+  }
+
+  /// 赤バナーを出さずに即座に再接続を試みる。
+  /// reconnecting 状態に遷移してスピナーのみ表示。
+  /// 失敗した場合のみ disconnected + エラーバナーを表示する。
+  Future<void> _silentReconnect() async {
+    if (_config == null) {
+      state = state.copyWith(
+        status: ConnectionStatus.disconnected,
+        errorMessage: 'Connection lost',
+        clearChannelManager: true,
+      );
+      return;
+    }
+    if (state.status == ConnectionStatus.reconnecting ||
+        state.status == ConnectionStatus.connecting ||
+        state.status == ConnectionStatus.connected) {
+      return;
+    }
+
+    final existingTerminal = state.terminal;
     state = state.copyWith(
-      status: ConnectionStatus.disconnected,
-      errorMessage: 'Connection lost',
+      status: ConnectionStatus.reconnecting,
       clearChannelManager: true,
     );
-    // 一時的なネットワーク不安定で PTY セッションを無駄に破棄しないよう、
-    // 2 秒遅延してから接続状態を再確認して reconnect する。
-    if (_config != null) {
-      Future.delayed(const Duration(seconds: 2), () {
-        // 遅延中に既に reconnect/connect が始まっていたら何もしない
-        if (state.status == ConnectionStatus.reconnecting ||
-            state.status == ConnectionStatus.connecting ||
-            state.status == ConnectionStatus.connected) {
-          return;
-        }
-        reconnect();
-      });
+
+    _cleanupConnections();
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    try {
+      final terminal = await _connectCore(
+        config: _config!,
+        password: _password,
+        privateKeyPem: _privateKeyPem,
+        passphrase: _passphrase,
+        existingTerminal: existingTerminal,
+      );
+      AppLogger.instance.log('[SSH][$arg] silent reconnect succeeded');
+      if (existingTerminal != null) {
+        terminal.write('\r\n\x1B[33m--- Reconnected ---\x1B[0m\r\n');
+      }
+      _retryCount = 0;
+      _lastReconnectAttempt = null;
+      _lastAliveConfirmed = DateTime.now();
+      _keepAliveFailCount = 0;
+      state = state.copyWith(
+        status: ConnectionStatus.connected,
+        terminal: terminal,
+        channelManager: _channelManager,
+      );
+      _startHealthCheck();
+      // tmux タブの場合は自動リアタッチ
+      _autoReattachTmux(terminal);
+    } catch (e) {
+      AppLogger.instance.log('[SSH][$arg] silent reconnect failed: $e');
+      state = state.copyWith(
+        status: ConnectionStatus.disconnected,
+        terminal: existingTerminal,
+        errorMessage: e.toString(),
+        clearChannelManager: true,
+      );
+      if (_retryCount < _maxRetries) {
+        _retryCount++;
+        final delay = Duration(seconds: 1 << _retryCount);
+        _retryTimer?.cancel();
+        _retryTimer = Timer(delay, () {
+          reconnect(isAutoRetry: true);
+        });
+      }
     }
+  }
+
+  /// tmux タブの場合、再接続後に自動で tmux セッションにリアタッチする。
+  void _autoReattachTmux(Terminal terminal) {
+    if (_tmuxSessionName == null) return;
+    AppLogger.instance.log('[SSH][$arg] auto-reattach tmux: $_tmuxSessionName');
+    final escaped = _tmuxSessionName!.replaceAll("'", r"'\''");
+    // 少し待ってからアタッチ（シェルの起動を待つ）
+    Future.delayed(const Duration(milliseconds: 500), () {
+      terminal.textInput("tmux attach -t '$escaped'\r");
+    });
   }
 
   void _startHealthCheck() {
@@ -291,13 +370,18 @@ class TerminalConnectionNotifier
           state.status == ConnectionStatus.connected) {
         _lastAliveConfirmed = DateTime.now();
         _keepAliveFailCount = 0;
-      } else if (!alive) {
-        // 1 回の失敗では再接続しない。一時的なネットワーク遅延を吸収する。
-        // 連続 2 回失敗したら切断と判定する。
+      } else if (!alive && identical(service, _sshService)) {
+        // 1〜2 回の失敗では再接続しない。一時的なネットワーク遅延を吸収する。
+        // keepalive は 10 秒ごとに実行されるため、連続 3 回失敗（30 秒間応答なし）
+        // で切断と判定する。
+        // identical チェック: await 中に reconnect() で _sshService が差し替わった場合、
+        // 古いサービスの失敗を新しい接続のカウンタに加算しない。
         _keepAliveFailCount++;
-        if (_keepAliveFailCount >= 2) {
+        AppLogger.instance.log('[SSH][$arg] keepalive FAILED ($_keepAliveFailCount)');
+        if (_keepAliveFailCount >= 3) {
           _keepAliveFailCount = 0;
-          _onDisconnected();
+          AppLogger.instance.log('[SSH][$arg] keepalive failed 3 times, silent reconnect');
+          _silentReconnect();
         }
       }
       return;
@@ -376,15 +460,8 @@ class TerminalConnectionNotifier
         }
       }
 
-      // ゾンビ接続: state を disconnected に変更してから reconnect
-      // （reconnect() は disconnected 状態でないと実行しないため）
-      _cleanupConnections();
-      state = state.copyWith(
-        status: ConnectionStatus.disconnected,
-        errorMessage: 'Connection lost',
-        clearChannelManager: true,
-      );
-      await reconnect();
+      AppLogger.instance.log('[SSH][$arg] zombie connection, silent reconnect');
+      await _silentReconnect();
     } finally {
       _isCheckingConnection = false;
     }
@@ -423,6 +500,7 @@ class TerminalConnectionNotifier
         passphrase: _passphrase,
         existingTerminal: existingTerminal,
       );
+      AppLogger.instance.log('[SSH][$arg] reconnect succeeded');
       if (existingTerminal != null) {
         terminal.write('\r\n\x1B[33m--- Reconnected ---\x1B[0m\r\n');
       }
@@ -436,7 +514,10 @@ class TerminalConnectionNotifier
         channelManager: _channelManager,
       );
       _startHealthCheck();
+      // tmux タブの場合は自動リアタッチ
+      _autoReattachTmux(terminal);
     } catch (e) {
+      AppLogger.instance.log('[SSH][$arg] reconnect failed: $e');
       state = state.copyWith(
         status: ConnectionStatus.disconnected,
         terminal: existingTerminal,
@@ -453,6 +534,18 @@ class TerminalConnectionNotifier
         });
       }
     }
+  }
+
+  /// テスト専用: SSH サービスインスタンスと接続状態を直接設定する。
+  /// 実際の SSH 接続を確立せずに keepAlive 挙動をテストするために使用する。
+  @visibleForTesting
+  void initConnectedStateForTesting({
+    required SshClientService sshService,
+    required TerminalConnectionState connectedState,
+  }) {
+    _sshService = sshService;
+    _keepAliveFailCount = 0;
+    state = connectedState;
   }
 
   /// Cancels SSH subscriptions and disposes resources without clearing state.
