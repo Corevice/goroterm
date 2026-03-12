@@ -5,6 +5,321 @@ import 'package:xterm/xterm.dart';
 import 'package:terminal_ssh_app/widgets/quick_action_bar.dart';
 
 void main() {
+  group('QuickActionBar optional callbacks', () {
+    testWidgets('Claude button hidden when onClaudeCommand is null',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.auto_awesome), findsNothing);
+    });
+
+    testWidgets('Claude button shown and tappable when onClaudeCommand provided',
+        (tester) async {
+      var called = false;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onClaudeCommand: () => called = true,
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.auto_awesome), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.auto_awesome));
+      await tester.pump();
+      expect(called, isTrue);
+    });
+
+    testWidgets('image paste button hidden when onImagePaste is null',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.attach_file), findsNothing);
+    });
+
+    testWidgets('image paste button shown and tappable when provided',
+        (tester) async {
+      var called = false;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onImagePaste: () => called = true,
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.attach_file), findsOneWidget);
+      await tester.ensureVisible(find.byIcon(Icons.attach_file));
+      await tester.tap(find.byIcon(Icons.attach_file));
+      await tester.pump();
+      expect(called, isTrue);
+    });
+
+    testWidgets('clipboard paste button hidden when onClipboardPaste is null',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.content_paste), findsNothing);
+    });
+
+    testWidgets('clipboard paste button shown and tappable when provided',
+        (tester) async {
+      var called = false;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onClipboardPaste: () => called = true,
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.content_paste), findsOneWidget);
+      await tester.ensureVisible(find.byIcon(Icons.content_paste));
+      await tester.tap(find.byIcon(Icons.content_paste));
+      await tester.pump();
+      expect(called, isTrue);
+    });
+
+    testWidgets('select mode button hidden when onToggleSelectMode is null',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.text_fields), findsNothing);
+    });
+
+    testWidgets('select mode button shown and tappable when provided',
+        (tester) async {
+      var called = false;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onToggleSelectMode: () => called = true,
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.text_fields), findsOneWidget);
+      await tester.ensureVisible(find.byIcon(Icons.text_fields));
+      await tester.tap(find.byIcon(Icons.text_fields));
+      await tester.pump();
+      expect(called, isTrue);
+    });
+
+    testWidgets('scroll to top button calls callback', (tester) async {
+      var called = false;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onScrollToTop: () => called = true,
+          ),
+        ),
+      ));
+      await tester.tap(find.byIcon(Icons.vertical_align_top));
+      await tester.pump();
+      expect(called, isTrue);
+    });
+
+    testWidgets('scroll to bottom button calls callback', (tester) async {
+      var called = false;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onScrollToBottom: () => called = true,
+          ),
+        ),
+      ));
+      await tester.tap(find.byIcon(Icons.vertical_align_bottom));
+      await tester.pump();
+      expect(called, isTrue);
+    });
+
+    testWidgets('PgUp button calls callback', (tester) async {
+      var called = false;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onPageUp: () => called = true,
+          ),
+        ),
+      ));
+      await tester.tap(find.text('PgUp'));
+      await tester.pump();
+      expect(called, isTrue);
+    });
+
+    testWidgets('PgDn button calls callback', (tester) async {
+      var called = false;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onPageDown: () => called = true,
+          ),
+        ),
+      ));
+      await tester.tap(find.text('PgDn'));
+      await tester.pump();
+      expect(called, isTrue);
+    });
+
+    testWidgets('symbol buttons send correct text input', (tester) async {
+      final inputs = <String>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: inputs.add,
+          ),
+        ),
+      ));
+      await tester.ensureVisible(find.text('/'));
+      await tester.tap(find.text('/'));
+      await tester.pump();
+      await tester.ensureVisible(find.text('-'));
+      await tester.tap(find.text('-'));
+      await tester.pump();
+      await tester.ensureVisible(find.text('|'));
+      await tester.tap(find.text('|'));
+      await tester.pump();
+      expect(inputs, ['/', '-', '|']);
+    });
+
+    testWidgets('select mode button shows active/inactive styles', (tester) async {
+      var selectMode = false;
+
+      Widget buildWithSelectMode(bool isSelectMode) => MaterialApp(
+            home: Scaffold(
+              body: QuickActionBar(
+                onKeyPressed: (key, {ctrl = false}) {},
+                onTextInput: (_) {},
+                onToggleSelectMode: () => selectMode = !selectMode,
+                isSelectMode: isSelectMode,
+              ),
+            ),
+          );
+
+      await tester.pumpWidget(buildWithSelectMode(false));
+      final inactiveFinder = find.byIcon(Icons.text_fields);
+      expect(inactiveFinder, findsOneWidget);
+
+      await tester.pumpWidget(buildWithSelectMode(true));
+      final activeFinder = find.byIcon(Icons.text_fields);
+      expect(activeFinder, findsOneWidget);
+    });
+  });
+
+  group('_RepeatableActionButton', () {
+    testWidgets('short tap sends exactly one key event', (tester) async {
+      final calls = <TerminalKey>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+            onTextInput: (_) {},
+          ),
+        ),
+      ));
+
+      // Quick tap (shorter than activation delay 80ms)
+      await tester.tap(find.byIcon(Icons.arrow_upward));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(calls, [TerminalKey.arrowUp]);
+    });
+
+    testWidgets('long press triggers repeat events', (tester) async {
+      final calls = <TerminalKey>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+            onTextInput: (_) {},
+          ),
+        ),
+      ));
+
+      // Press and hold past activation delay (80ms) + repeat start delay (200ms)
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.arrow_upward)),
+      );
+      await tester.pump(const Duration(milliseconds: 90)); // pass activation
+      // First press fires at activation
+      expect(calls.length, 1);
+      expect(calls.first, TerminalKey.arrowUp);
+
+      // After repeat start delay (200ms) + a few 50ms ticks
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(const Duration(milliseconds: 50));
+      // Should have additional calls from periodic timer
+      expect(calls.length, greaterThan(2));
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('horizontal swipe cancels and sends no events', (tester) async {
+      final calls = <TerminalKey>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: QuickActionBar(
+              onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+              onTextInput: (_) {},
+            ),
+          ),
+        ),
+      ));
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.arrow_upward)),
+      );
+      // Move horizontally beyond the 8px threshold
+      await gesture.moveBy(const Offset(20, 0));
+      await tester.pump(const Duration(milliseconds: 200));
+      await gesture.up();
+      await tester.pump();
+
+      expect(calls, isEmpty);
+    });
+  });
+
   group('QuickActionBar shortcut buttons (Phase 16)', () {
     late List<(TerminalKey, bool)> calls;
 
