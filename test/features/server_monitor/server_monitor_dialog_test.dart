@@ -312,6 +312,100 @@ void main() {
       expect(callCount, 2);
     });
 
+    testWidgets('parses df -k Linux fallback output correctly', (tester) async {
+      // df -k Linux: Filesystem 1K-blocks Used Available Use% Mounted-on
+      // Sizes are in KB (multiply by 1024 to get bytes).
+      const dfKOutput = '''
+===HOSTNAME===
+linux-server
+===UNAME===
+Linux 6.1.0
+===UPTIME===
+up 1 day
+===LOADAVG===
+0.10 0.20 0.30 1/100 1234
+===MEMORY===
+              total        used        free      shared  buff/cache   available
+Mem:     4294967296  2147483648  2147483648           0           0  2147483648
+===DISK===
+Filesystem     1K-blocks     Used Available Use% Mounted on
+/dev/sda1       10485760  5242880   5242880  50% /
+/dev/sdb1       20971520  2097152  18874368  10% /data
+===PROCS===
+USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root         1  1.0  0.5 12345 6789 ?        Ss   Jan01   0:01 /sbin/init
+===END===
+''';
+      when(() => mockChannelManager.runCommand(any())).thenAnswer(
+        (_) async => Uint8List.fromList(utf8.encode(dfKOutput)),
+      );
+
+      await tester.pumpWidget(buildTestWidget(
+        channelManager: mockChannelManager,
+      ));
+      await tester.pumpAndSettle();
+
+      final context = tester.element(find.byType(Scaffold));
+      ServerMonitorDialog.show(context, 'test-session');
+      await tester.pumpAndSettle();
+
+      // Mount points must be last col (not device paths)
+      expect(find.text('/'), findsOneWidget);
+      expect(find.text('/data'), findsOneWidget);
+      // Use% should display correctly
+      expect(find.text('50%'), findsOneWidget);
+      expect(find.text('10%'), findsOneWidget);
+      // Sizes: 10485760 KB * 1024 = 10 GB, 5242880 KB used = 5 GB
+      expect(find.textContaining('5.0 GB / 10.0 GB'), findsOneWidget);
+    });
+
+    testWidgets('parses df -k macOS fallback output correctly', (tester) async {
+      // macOS df -k has extra iused/ifree/%iused columns before Mounted on
+      const dfKMacOutput = '''
+===HOSTNAME===
+mac-server
+===UNAME===
+Darwin 23.0.0
+===UPTIME===
+up 2 hours
+===LOADAVG===
+1.50 1.20 0.90 3/150 9876
+===MEMORY===
+              total        used        free      shared  buff/cache   available
+Mem:    17179869184  8589934592  8589934592           0           0  8589934592
+===DISK===
+Filesystem    1024-blocks      Used  Available Capacity  iused      ifree %iused  Mounted on
+/dev/disk1s1    244277768  11094520  105453544       10% 484789 4293798490    0%   /
+/dev/disk1s5    244277768   5242880  105453544        5% 100000 4294067490    0%   /System/Volumes/Data
+===PROCS===
+USER       PID %CPU %MEM    VSZ   RSS TTY  STAT START TIME COMMAND
+root         1  2.0  1.0 409600 81920 ??   Ss   Fri01 0:12 /sbin/launchd
+===END===
+''';
+      when(() => mockChannelManager.runCommand(any())).thenAnswer(
+        (_) async => Uint8List.fromList(utf8.encode(dfKMacOutput)),
+      );
+
+      await tester.pumpWidget(buildTestWidget(
+        channelManager: mockChannelManager,
+      ));
+      await tester.pumpAndSettle();
+
+      final context = tester.element(find.byType(Scaffold));
+      ServerMonitorDialog.show(context, 'test-session');
+      await tester.pumpAndSettle();
+
+      // Mount points must be last col, not device paths
+      expect(find.text('/'), findsOneWidget);
+      expect(find.text('/System/Volumes/Data'), findsOneWidget);
+      // Device paths must NOT appear as mount labels
+      expect(find.text('/dev/disk1s1'), findsNothing);
+      expect(find.text('/dev/disk1s5'), findsNothing);
+      // Use% columns
+      expect(find.text('10%'), findsOneWidget);
+      expect(find.text('5%'), findsOneWidget);
+    });
+
     testWidgets('memory progress bar uses correct colors', (tester) async {
       // Test with high memory usage (>90%)
       final highMemOutput = _sampleOutput.replaceAll(

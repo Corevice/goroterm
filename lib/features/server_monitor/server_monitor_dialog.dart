@@ -565,25 +565,54 @@ class _ServerInfo {
     }
 
     // Parse disk
+    // Two possible formats:
+    //   df -B1 --output=target,size,used,avail,pcent (Linux):
+    //     header starts with "Mounted on", sizes in bytes, mount is col 0
+    //   df -k fallback (macOS/BSD/Linux):
+    //     header starts with "Filesystem", sizes in 1K-blocks, mount is last col
     final diskLines = (sections['DISK'] ?? '').split('\n');
     final disks = <_DiskInfo>[];
+    final isDfKFormat = diskLines.isNotEmpty &&
+        diskLines[0].trim().toLowerCase().startsWith('filesystem');
     for (var i = 0; i < diskLines.length; i++) {
       final line = diskLines[i].trim();
       if (line.isEmpty || i == 0) continue; // skip header
       final parts = line.split(RegExp(r'\s+'));
-      if (parts.length >= 5) {
-        final mountPoint = parts[0];
-        final size = int.tryParse(parts[1]) ?? 0;
-        final used = int.tryParse(parts[2]) ?? 0;
-        final percentStr = parts[4].replaceAll('%', '');
-        final percent = int.tryParse(percentStr) ?? 0;
-        if (size > 0) {
-          disks.add(_DiskInfo(
-            mountPoint: mountPoint,
-            size: size,
-            used: used,
-            usedPercent: percent,
-          ));
+      if (isDfKFormat) {
+        // df -k: Filesystem 1K-blocks Used Available Use% [iused ifree %iused] Mounted-on
+        if (parts.length >= 6) {
+          final mountPoint = parts.last;
+          final sizeKb = int.tryParse(parts[1]) ?? 0;
+          final usedKb = int.tryParse(parts[2]) ?? 0;
+          final percentStr = parts[4].replaceAll('%', '');
+          final percent = int.tryParse(percentStr) ?? 0;
+          final size = sizeKb * 1024;
+          final used = usedKb * 1024;
+          if (size > 0) {
+            disks.add(_DiskInfo(
+              mountPoint: mountPoint,
+              size: size,
+              used: used,
+              usedPercent: percent,
+            ));
+          }
+        }
+      } else {
+        // df -B1 --output=target,size,used,avail,pcent: mount is col 0, sizes in bytes
+        if (parts.length >= 5) {
+          final mountPoint = parts[0];
+          final size = int.tryParse(parts[1]) ?? 0;
+          final used = int.tryParse(parts[2]) ?? 0;
+          final percentStr = parts[4].replaceAll('%', '');
+          final percent = int.tryParse(percentStr) ?? 0;
+          if (size > 0) {
+            disks.add(_DiskInfo(
+              mountPoint: mountPoint,
+              size: size,
+              used: used,
+              usedPercent: percent,
+            ));
+          }
         }
       }
     }
