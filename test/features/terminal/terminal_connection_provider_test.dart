@@ -49,6 +49,34 @@ class _FakeSshClientService extends SshClientService {
   }
 }
 
+/// Fake SSH service that counts keepAlive() invocations — used to verify
+/// that concurrent activeKeepAlive() calls are deduplicated.
+class _CountingSshClientService extends SshClientService {
+  _CountingSshClientService()
+      : super(
+          knownHostsStore: KnownHostsStore(
+            storage: _MockFlutterSecureStorage(),
+          ),
+        );
+
+  int keepAliveCount = 0;
+
+  @override
+  bool get isConnected => true;
+
+  @override
+  Future<bool> keepAlive({
+    Duration executeTimeout = const Duration(seconds: 5),
+    Duration doneTimeout = const Duration(seconds: 5),
+  }) async {
+    keepAliveCount++;
+    return true;
+  }
+
+  @override
+  void disconnect() {}
+}
+
 /// Fake SSH service that always reports disconnected — used to test early exit.
 class _FakeDisconnectedSshClientService extends SshClientService {
   _FakeDisconnectedSshClientService()
@@ -511,6 +539,116 @@ void main() {
       );
     });
 
+    test('reconnect error message is set after 3 keepAlive failures', () async {
+      // When _config is set, _scheduleReconnect sets a user-visible
+      // error message in the format "Reconnecting in Xs... (attempt #N)".
+      fakeService.keepAliveResult = false;
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+        config: const ConnectionConfig(
+          label: 'test-server',
+          host: '192.168.1.1',
+          username: 'admin',
+        ),
+      );
+
+      await notifier.activeKeepAlive();
+      await notifier.activeKeepAlive();
+      await notifier.activeKeepAlive();
+
+      final state = container.read(terminalConnectionProvider('ka-test'));
+      expect(state.status, ConnectionStatus.disconnected);
+      // First retry: _retryCount=1, delaySec = 3*(1<<0) = 3s.
+      expect(state.errorMessage, 'Reconnecting in 3s... (attempt #1)');
+    });
+
+    test('exponential backoff doubles delay on 2nd retry', () {
+      // Verify that _scheduleReconnect increments _retryCount and computes
+      // backoff as 3*(1<<(_retryCount-1)):
+      //   attempt #1 → 3*(1<<0) = 3s
+      //   attempt #2 → 3*(1<<1) = 6s
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.disconnected,
+          hostLabel: 'test-host',
+        ),
+        config: const ConnectionConfig(
+          label: 'test-server',
+          host: '192.168.1.1',
+          username: 'admin',
+        ),
+      );
+
+      notifier.triggerScheduleReconnectForTesting(); // attempt #1 → 3s
+      notifier.triggerScheduleReconnectForTesting(); // attempt #2 → 6s
+
+      final state = container.read(terminalConnectionProvider('ka-test'));
+      expect(state.status, ConnectionStatus.disconnected);
+      expect(state.errorMessage, 'Reconnecting in 6s... (attempt #2)');
+    });
+
+    test('exponential backoff full sequence: 3s→6s→12s→24s→30s→30s', () {
+      // attempt #1: 3*(1<<0) = 3s
+      // attempt #2: 3*(1<<1) = 6s
+      // attempt #3: 3*(1<<2) = 12s
+      // attempt #4: 3*(1<<3) = 24s
+      // attempt #5: 3*(1<<4) = 48s → clamp → 30s
+      // attempt #6: 3*(1<<5) = 96s → clamp → 30s
+      const config = ConnectionConfig(
+        label: 'test-server',
+        host: '192.168.1.1',
+        username: 'admin',
+      );
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.disconnected,
+          hostLabel: 'test-host',
+        ),
+        config: config,
+      );
+
+      final expectedDelays = [3, 6, 12, 24, 30, 30];
+      for (var i = 0; i < expectedDelays.length; i++) {
+        notifier.triggerScheduleReconnectForTesting();
+        final state = container.read(terminalConnectionProvider('ka-test'));
+        expect(
+          state.errorMessage,
+          'Reconnecting in ${expectedDelays[i]}s... (attempt #${i + 1})',
+          reason: 'attempt #${i + 1} should have ${expectedDelays[i]}s delay',
+        );
+      }
+    });
+
+    test('exponential backoff clamps at 30s after many retries', () {
+      // After 20+ retries the delay must still be 30s (not overflow).
+      const config = ConnectionConfig(
+        label: 'test-server',
+        host: '192.168.1.1',
+        username: 'admin',
+      );
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.disconnected,
+          hostLabel: 'test-host',
+        ),
+        config: config,
+      );
+
+      for (var i = 0; i < 20; i++) {
+        notifier.triggerScheduleReconnectForTesting();
+      }
+
+      final state = container.read(terminalConnectionProvider('ka-test'));
+      expect(state.errorMessage, 'Reconnecting in 30s... (attempt #20)');
+    });
+
     test('service swap during await does not pollute new connection count',
         () async {
       // Simulate: old service fails, but _sshService was replaced (reconnect).
@@ -734,6 +872,68 @@ void main() {
 
       // isConnected=false なので最初のポーリングで break → 300ms + わずか。
       expect(sw.elapsedMilliseconds, lessThan(600));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // activeKeepAlive() — concurrent call deduplication
+  //
+  // _isActiveKeepAliveRunning フラグにより、2 回目以降の concurrent 呼び出しは
+  // 早期リターンし、実際の SSH keepAlive probe は 1 回だけ送信される。
+  // これはフォアグラウンドサービスのタイマーが重なって発火した場合に
+  // 余分な SSH exec チャネルが開かれないための重要な保証。
+  // -------------------------------------------------------------------------
+
+  group('activeKeepAlive() concurrent call deduplication', () {
+    late ProviderContainer container;
+    late TerminalConnectionNotifier notifier;
+    late _CountingSshClientService countingService;
+
+    setUp(() {
+      container = makeContainer();
+      notifier = container.read(
+        terminalConnectionProvider('ka-dedup-test').notifier,
+      );
+      countingService = _CountingSshClientService();
+      notifier.initConnectedStateForTesting(
+        sshService: countingService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+      );
+    });
+
+    tearDown(() => container.dispose());
+
+    test('concurrent calls send only one keepAlive probe', () async {
+      // 2 つの concurrent 呼び出しを await なしで起動する。
+      // Dart はシングルスレッドのため、最初の呼び出しが await に達した時点で
+      // 2 番目が開始され、_isActiveKeepAliveRunning == true を見て早期リターンする。
+      final f1 = notifier.activeKeepAlive();
+      final f2 = notifier.activeKeepAlive();
+      await Future.wait([f1, f2]);
+
+      // SSH keepAlive は 1 回だけ実行された
+      expect(countingService.keepAliveCount, 1);
+    });
+
+    test('sequential calls each send one keepAlive probe', () async {
+      // 直列呼び出しはそれぞれ独立して実行される
+      await notifier.activeKeepAlive();
+      await notifier.activeKeepAlive();
+
+      expect(countingService.keepAliveCount, 2);
+    });
+
+    test('third concurrent call is also deduplicated', () async {
+      // 3 つの concurrent 呼び出しでも keepAlive は 1 回だけ
+      final f1 = notifier.activeKeepAlive();
+      final f2 = notifier.activeKeepAlive();
+      final f3 = notifier.activeKeepAlive();
+      await Future.wait([f1, f2, f3]);
+
+      expect(countingService.keepAliveCount, 1);
     });
   });
 }

@@ -159,6 +159,22 @@ void main() {
       expect(state.activeSessionId, id1);
     });
 
+    test('removeSession keeps active session when non-active session removed', () {
+      final container = makeContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(sessionManagerProvider.notifier);
+
+      final id1 = notifier.addSession(connectionId: 1, label: 'A');
+      final id2 = notifier.addSession(connectionId: 2, label: 'B');
+
+      // id2 is active. Remove id1 (non-active).
+      notifier.removeSession(id1);
+
+      final state = container.read(sessionManagerProvider);
+      expect(state.sessions.length, 1);
+      expect(state.activeSessionId, id2);
+    });
+
     test('removeSession clears activeSessionId when last session removed', () {
       final container = makeContainer();
       addTearDown(container.dispose);
@@ -181,6 +197,40 @@ void main() {
       notifier.addSession(connectionId: 1, label: 'Server');
 
       expect(container.read(sessionManagerProvider).sessions.length, 2);
+    });
+
+    test('removeSession preserves batteryWarning', () {
+      final container = makeContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(sessionManagerProvider.notifier);
+
+      final id1 = notifier.addSession(connectionId: 1, label: 'A');
+      notifier.addSession(connectionId: 2, label: 'B');
+
+      // Simulate battery warning being set (e.g. by _updateForegroundService).
+      notifier.setBatteryWarningForTesting(true);
+      expect(container.read(sessionManagerProvider).batteryWarning, isTrue);
+
+      // Removing a session must not reset batteryWarning to false.
+      notifier.removeSession(id1);
+
+      expect(container.read(sessionManagerProvider).batteryWarning, isTrue);
+    });
+
+    test('removeSession preserves batteryWarning when last session removed', () {
+      final container = makeContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(sessionManagerProvider.notifier);
+
+      final id1 = notifier.addSession(connectionId: 1, label: 'A');
+      notifier.setBatteryWarningForTesting(true);
+
+      notifier.removeSession(id1);
+
+      // batteryWarning remains true even after the last session is closed.
+      final state = container.read(sessionManagerProvider);
+      expect(state.sessions, isEmpty);
+      expect(state.batteryWarning, isTrue);
     });
   });
 

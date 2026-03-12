@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/background/ssh_foreground_service.dart';
@@ -64,15 +65,7 @@ class SessionManagerNotifier extends Notifier<SessionManagerState> {
     );
     final updated = [...state.sessions, session];
     state = state.copyWith(sessions: updated, activeSessionId: sessionId);
-
-    // フォアグラウンドサービスを開始/更新
-    SshForegroundService.ensureRunning(sessionCount: updated.length)
-        .then((batteryOk) {
-      if (!batteryOk) {
-        state = state.copyWith(batteryWarning: true);
-      }
-    });
-
+    _updateForegroundService(updated.length);
     return sessionId;
   }
 
@@ -87,18 +80,17 @@ class SessionManagerNotifier extends Notifier<SessionManagerState> {
     if (newActive == sessionId) {
       newActive = updated.isNotEmpty ? updated.last.sessionId : null;
     }
-    state = SessionManagerState(sessions: updated, activeSessionId: newActive);
+    state = state.copyWith(
+      sessions: updated,
+      activeSessionId: newActive,
+      clearActiveSessionId: newActive == null,
+    );
 
     // 全セッション終了時にサービスを停止、それ以外は通知更新
     if (updated.isEmpty) {
       SshForegroundService.stop();
     } else {
-      SshForegroundService.ensureRunning(sessionCount: updated.length)
-          .then((batteryOk) {
-        if (!batteryOk) {
-          state = state.copyWith(batteryWarning: true);
-        }
-      });
+      _updateForegroundService(updated.length);
     }
   }
 
@@ -135,13 +127,24 @@ class SessionManagerNotifier extends Notifier<SessionManagerState> {
     );
     final updated = [...state.sessions, session];
     state = state.copyWith(sessions: updated, activeSessionId: sessionId);
-    SshForegroundService.ensureRunning(sessionCount: updated.length)
+    _updateForegroundService(updated.length);
+    return sessionId;
+  }
+
+  /// テスト専用: batteryWarning フラグを直接設定する。
+  @visibleForTesting
+  void setBatteryWarningForTesting(bool value) {
+    state = state.copyWith(batteryWarning: value);
+  }
+
+  /// フォアグラウンドサービスを開始/更新し、バッテリー最適化警告を処理する。
+  void _updateForegroundService(int sessionCount) {
+    SshForegroundService.ensureRunning(sessionCount: sessionCount)
         .then((batteryOk) {
       if (!batteryOk) {
         state = state.copyWith(batteryWarning: true);
       }
     });
-    return sessionId;
   }
 }
 

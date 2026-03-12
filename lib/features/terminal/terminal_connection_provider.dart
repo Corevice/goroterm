@@ -83,10 +83,19 @@ class TerminalConnectionNotifier
   bool _isActiveKeepAliveRunning = false;
   int _keepAliveFailCount = 0;
 
-  // Batch output buffer: accumulates SSH stdout chunks and flushes every 16 ms
-  // to reduce UI thread work during high-throughput output.
+  // Batch output buffer: accumulates SSH stdout chunks and flushes periodically.
+  // Each flush writes at most _flushChunkSize bytes to terminal.write().
+  // If more data remains, the next flush is scheduled after a short delay
+  // so the UI thread can render a frame between chunks.
+  // This prevents blocking during heavy output (e.g. Claude Code on tmux).
   final StringBuffer _outputBuffer = StringBuffer();
   Timer? _flushTimer;
+  static const int _flushChunkSize = 16 * 1024; // 16 KB per flush
+
+  // リサイズ直後はチャンク分割を一時的に無効化する。
+  // tmux のリドロー出力を分割すると表示崩れの原因になるため。
+  Timer? _resizeGuardTimer;
+  bool _resizeGuardActive = false;
 
   @override
   TerminalConnectionState build(String arg) {
@@ -199,6 +208,15 @@ class TerminalConnectionNotifier
           },
           onResize: (width, height, pixelWidth, pixelHeight) {
             _channelManager?.resizePty(width, height);
+            // リサイズ後 1500ms はチャンク分割を無効化
+            // キーボード表示アニメーション中に複数回リサイズが発火するため
+            // 十分な猶予を持たせて tmux リドロー出力の分割を防止
+            _resizeGuardActive = true;
+            _resizeGuardTimer?.cancel();
+            _resizeGuardTimer = Timer(const Duration(milliseconds: 1500), () {
+              _resizeGuardActive = false;
+              _resizeGuardTimer = null;
+            });
           },
         );
 
@@ -228,9 +246,25 @@ class TerminalConnectionNotifier
 
   void _flushOutput(Terminal terminal) {
     _flushTimer = null;
-    if (_outputBuffer.isNotEmpty) {
-      terminal.write(_outputBuffer.toString());
+    if (_outputBuffer.isEmpty) return;
+
+    final data = _outputBuffer.toString();
+
+    if (data.length <= _flushChunkSize || _resizeGuardActive) {
+      // Small output or resize guard active: write all at once
       _outputBuffer.clear();
+      terminal.write(data);
+    } else {
+      // Large output: write one chunk now, put the rest back,
+      // and schedule the next chunk after a short delay so the
+      // UI thread can process input events and render a frame.
+      _outputBuffer.clear();
+      terminal.write(data.substring(0, _flushChunkSize));
+      _outputBuffer.write(data.substring(_flushChunkSize));
+      _flushTimer = Timer(
+        const Duration(milliseconds: 8),
+        () => _flushOutput(terminal),
+      );
     }
   }
 
@@ -264,7 +298,10 @@ class TerminalConnectionNotifier
 
     _retryCount++;
     // 指数バックオフ: 3s → 6s → 12s → 24s → 30s（上限）
-    final delaySec = (3 * (1 << (_retryCount - 1))).clamp(3, 30);
+    // ビットシフト量を 10 に上限を設けることで AOT 環境での整数オーバーフローを防ぐ
+    // (2^10 = 1024, 3*1024 = 3072 >> 30 なので上限には影響しない)
+    final shift = (_retryCount - 1).clamp(0, 10);
+    final delaySec = (3 * (1 << shift)).clamp(3, 30);
     final delay = Duration(seconds: delaySec);
     AppLogger.instance.log('[SSH][$arg] scheduling reconnect #$_retryCount in ${delay.inSeconds}s');
 
@@ -487,6 +524,11 @@ class TerminalConnectionNotifier
     state = connectedState;
   }
 
+  /// テスト専用: _scheduleReconnect() を直接呼び出す。
+  /// 指数バックオフのステート変化をタイマー発火なしに検証するために使用する。
+  @visibleForTesting
+  void triggerScheduleReconnectForTesting() => _scheduleReconnect();
+
   /// Cancels SSH subscriptions and disposes resources without clearing state.
   void _cleanupConnections() {
     AppLogger.instance.log('[SSH][$arg] cleaning up connections');
@@ -494,6 +536,9 @@ class TerminalConnectionNotifier
     _shellOutputReceived = false;
     _flushTimer?.cancel();
     _flushTimer = null;
+    _resizeGuardTimer?.cancel();
+    _resizeGuardTimer = null;
+    _resizeGuardActive = false;
     _outputBuffer.clear();
     _stdoutSubscription?.cancel();
     _doneSubscription?.cancel();

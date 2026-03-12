@@ -66,5 +66,42 @@ void main() {
       await tester.pumpAndSettle();
       expect(calls, [(TerminalKey.keyJ, true)]);
     });
+
+    // All Ctrl menu entries and their expected TerminalKey values.
+    const ctrlMenuEntries = <(String, TerminalKey)>[
+      ('A', TerminalKey.keyA),
+      ('C', TerminalKey.keyC),
+      ('D', TerminalKey.keyD),
+      ('E', TerminalKey.keyE),
+      ('K', TerminalKey.keyK),
+      ('L', TerminalKey.keyL),
+      ('R', TerminalKey.keyR),
+      ('U', TerminalKey.keyU),
+      ('W', TerminalKey.keyW),
+      ('Z', TerminalKey.keyZ),
+    ];
+
+    for (final (char, expectedKey) in ctrlMenuEntries) {
+      testWidgets('Ctrl+$char from menu sends key$char with ctrl=true',
+          (tester) async {
+        await tester.pumpWidget(buildBar());
+        await tester.tap(find.text('Ctrl'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Ctrl+$char'));
+        await tester.pumpAndSettle();
+        expect(calls, [(expectedKey, true)]);
+      });
+    }
+
+    testWidgets('Ctrl menu shows all 11 entries', (tester) async {
+      await tester.pumpWidget(buildBar());
+      await tester.tap(find.text('Ctrl'));
+      await tester.pumpAndSettle();
+      const keys = ['C', 'D', 'J', 'Z', 'A', 'E', 'L', 'R', 'K', 'U', 'W'];
+      for (final key in keys) {
+        expect(find.text('Ctrl+$key'), findsOneWidget,
+            reason: 'Ctrl+$key should be in the menu');
+      }
+    });
   });
 }

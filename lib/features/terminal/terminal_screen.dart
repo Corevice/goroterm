@@ -27,6 +27,7 @@ import '../../core/utils/app_logger.dart';
 import '../../core/utils/shell_utils.dart';
 import '../../widgets/terminal_scroll_interceptor.dart';
 import '../claude_usage/claude_usage_dialog.dart';
+import '../server_monitor/server_monitor_dialog.dart';
 import '../../widgets/terminal_selection_toolbar.dart';
 
 /// Multi-session terminal screen. Manages tabs via [SessionManagerNotifier].
@@ -324,9 +325,40 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             onSelected: (value) {
               if (value == 'claude_usage') {
                 ClaudeUsageDialog.show(context, activeSession.sessionId);
+              } else if (value == 'server_monitor') {
+                ServerMonitorDialog.show(context, activeSession.sessionId);
+              } else if (value == 'refresh_screen') {
+                // PTY サイズを再送信して tmux に強制リドローさせる
+                final connState = ref.read(
+                    terminalConnectionProvider(activeSession.sessionId));
+                final terminal = connState.terminal;
+                final cm = connState.channelManager;
+                if (terminal != null && cm != null) {
+                  cm.resizePty(terminal.viewWidth, terminal.viewHeight);
+                }
               }
             },
             itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'refresh_screen',
+                child: Row(
+                  children: [
+                    Icon(Icons.refresh, size: 20),
+                    SizedBox(width: 12),
+                    Text('Refresh Screen'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'server_monitor',
+                child: Row(
+                  children: [
+                    Icon(Icons.monitor_heart_outlined, size: 20),
+                    SizedBox(width: 12),
+                    Text('Server Monitor'),
+                  ],
+                ),
+              ),
               const PopupMenuItem(
                 value: 'claude_usage',
                 child: Row(
@@ -397,7 +429,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
 
 // ---------------------------------------------------------------------------
 
-class _TabStrip extends StatelessWidget {
+class _TabStrip extends StatefulWidget {
   const _TabStrip({
     required this.sessions,
     required this.activeSessionId,
@@ -411,17 +443,64 @@ class _TabStrip extends StatelessWidget {
   final ValueChanged<String> onClose;
 
   @override
+  State<_TabStrip> createState() => _TabStripState();
+}
+
+class _TabStripState extends State<_TabStrip> {
+  final _scrollController = ScrollController();
+  final _tabKeys = <String, GlobalKey>{};
+
+  @override
+  void didUpdateWidget(covariant _TabStrip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.activeSessionId != oldWidget.activeSessionId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToActiveTab();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToActiveTab() {
+    final key = _tabKeys[widget.activeSessionId];
+    if (key == null) return;
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // 不要なキーを削除
+    final sessionIds = widget.sessions.map((s) => s.sessionId).toSet();
+    _tabKeys.removeWhere((id, _) => !sessionIds.contains(id));
+
     return SizedBox(
       height: 36,
       child: ListView.builder(
+        controller: _scrollController,
         scrollDirection: Axis.horizontal,
-        itemCount: sessions.length,
+        itemCount: widget.sessions.length,
         itemBuilder: (context, index) {
-          final session = sessions[index];
-          final isActive = session.sessionId == activeSessionId;
+          final session = widget.sessions[index];
+          final isActive = session.sessionId == widget.activeSessionId;
+          final tabKey = _tabKeys.putIfAbsent(
+            session.sessionId,
+            () => GlobalKey(),
+          );
           return InkWell(
-            onTap: () => onSelect(session.sessionId),
+            key: tabKey,
+            onTap: () => widget.onSelect(session.sessionId),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
@@ -443,7 +522,7 @@ class _TabStrip extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   InkWell(
-                    onTap: () => onClose(session.sessionId),
+                    onTap: () => widget.onClose(session.sessionId),
                     child: Icon(
                       Icons.close,
                       size: 14,
@@ -749,9 +828,35 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     }
   }
 
-  Future<void> _pasteImage() async {
+  static const _videoExtensions = {
+    '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp',
+  };
+
+  static const _uploadDir = '/tmp/.terminal-uploads';
+
+  bool _isVideo(String fileName) {
+    final lower = fileName.toLowerCase();
+    return _videoExtensions.any((ext) => lower.endsWith(ext));
+  }
+
+  String _timestamp() {
+    final now = DateTime.now();
+    return '${now.year}'
+        '${now.month.toString().padLeft(2, '0')}'
+        '${now.day.toString().padLeft(2, '0')}'
+        '_'
+        '${now.hour.toString().padLeft(2, '0')}'
+        '${now.minute.toString().padLeft(2, '0')}'
+        '${now.second.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _pasteMedia() async {
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
+      type: FileType.custom,
+      allowedExtensions: [
+        'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp',
+        'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', '3gp',
+      ],
     );
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
@@ -760,10 +865,16 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     final localFile = File(file.path!);
     final fileSize = await localFile.length();
 
-    if (fileSize > 10 * 1024 * 1024) {
+    // 画像 10MB / 動画 100MB
+    final isVideo = _isVideo(file.name);
+    final maxSize = isVideo ? 100 * 1024 * 1024 : 10 * 1024 * 1024;
+    if (fileSize > maxSize) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File too large (max 10MB)')),
+          SnackBar(
+            content: Text(
+                'File too large (max ${isVideo ? "100MB" : "10MB"})'),
+          ),
         );
       }
       return;
@@ -782,31 +893,32 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     }
 
     final fileName = file.name;
+    final ts = _timestamp();
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Uploading: $fileName')),
+        SnackBar(
+          content: Text(isVideo
+              ? 'Uploading & converting: $fileName'
+              : 'Uploading: $fileName'),
+          duration: const Duration(seconds: 30),
+        ),
       );
     }
 
     try {
-      // アップロード先を決定: PTY の CWD → SFTP のホームディレクトリ → /tmp
-      String uploadDir;
+      final sftp = await channelManager.openSftpChannel();
+
+      // ディレクトリがなければ作成
       try {
-        final cwd = await channelManager.getShellCwd();
-        if (cwd != null && cwd.isNotEmpty) {
-          uploadDir = cwd;
-        } else {
-          final sftp = await channelManager.openSftpChannel();
-          uploadDir = await sftp.absolute('.');
-        }
+        await sftp.stat(_uploadDir);
       } catch (_) {
-        uploadDir = '/tmp';
+        await sftp.mkdir(_uploadDir);
       }
 
-      final remotePath = '$uploadDir/$fileName';
+      final remotePath = '$_uploadDir/${ts}_$fileName';
 
-      final sftp = await channelManager.openSftpChannel();
+      // SFTP アップロード
       final remoteFile = await sftp.open(
         remotePath,
         mode: SftpFileOpenMode.write |
@@ -821,12 +933,63 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         await remoteFile.close();
       }
 
+      String pastePath = remotePath;
+
+      if (isVideo) {
+        // 動画 → GIF 変換（サーバー側 ffmpeg）
+        final gifPath = '$_uploadDir/${ts}_${fileName.split('.').first}.gif';
+        final ffmpegCmd =
+            "ffmpeg -i '${remotePath.replaceAll("'", "'\\''")}'"
+            " -vf 'fps=10,scale=480:-1:flags=lanczos'"
+            " -t 15 -y"
+            " '${gifPath.replaceAll("'", "'\\''")}'";
+
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(
+                content: Text('Converting to GIF...'),
+                duration: Duration(seconds: 60),
+              ),
+            );
+        }
+
+        try {
+          await channelManager.runCommand(ffmpegCmd);
+          // 変換成功 → GIF パスを使用、元動画を削除
+          pastePath = gifPath;
+          try {
+            await channelManager
+                .runCommand("rm -f '${remotePath.replaceAll("'", "'\\''")}'"
+            );
+          } catch (_) {}
+        } catch (e) {
+          // ffmpeg 失敗（未インストール等）→ 元動画パスをそのまま使用
+          if (mounted) {
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(
+                SnackBar(
+                  content: Text(
+                      'GIF conversion failed (ffmpeg not found?). '
+                      'Video uploaded as: $remotePath'),
+                  duration: const Duration(seconds: 5),
+                ),
+              );
+          }
+        }
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
-            SnackBar(content: Text('Uploaded: $remotePath')),
+            SnackBar(content: Text('Ready: $pastePath')),
           );
+
+        // パスをターミナルに自動ペースト
+        connectionState.terminal?.paste(pastePath);
       }
     } catch (e) {
       if (mounted) {
@@ -943,7 +1106,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
           onClaudeCommand: connectionState.terminal != null
               ? () => connectionState.terminal?.textInput('claude\r')
               : null,
-          onImagePaste: connectionState.terminal != null ? _pasteImage : null,
+          onImagePaste: connectionState.terminal != null ? _pasteMedia : null,
           onClipboardPaste: connectionState.terminal != null
               ? () async {
                   final data =

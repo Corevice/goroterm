@@ -115,7 +115,7 @@ class QuickActionBar extends StatelessWidget {
               if (onToggleSelectMode != null) const SizedBox(width: 8),
               if (onImagePaste != null) ...[
                 _ActionButton(
-                  icon: Icons.image,
+                  icon: Icons.attach_file,
                   onPressed: onImagePaste!,
                 ),
               ],
@@ -181,34 +181,22 @@ class QuickActionBar extends StatelessWidget {
     );
   }
 
-  TerminalKey _terminalKeyFromChar(String char) {
-    switch (char) {
-      case 'A':
-        return TerminalKey.keyA;
-      case 'C':
-        return TerminalKey.keyC;
-      case 'D':
-        return TerminalKey.keyD;
-      case 'E':
-        return TerminalKey.keyE;
-      case 'J':
-        return TerminalKey.keyJ;
-      case 'K':
-        return TerminalKey.keyK;
-      case 'L':
-        return TerminalKey.keyL;
-      case 'R':
-        return TerminalKey.keyR;
-      case 'U':
-        return TerminalKey.keyU;
-      case 'W':
-        return TerminalKey.keyW;
-      case 'Z':
-        return TerminalKey.keyZ;
-      default:
-        return TerminalKey.keyA;
-    }
-  }
+  static const Map<String, TerminalKey> _ctrlKeyMap = {
+    'A': TerminalKey.keyA,
+    'C': TerminalKey.keyC,
+    'D': TerminalKey.keyD,
+    'E': TerminalKey.keyE,
+    'J': TerminalKey.keyJ,
+    'K': TerminalKey.keyK,
+    'L': TerminalKey.keyL,
+    'R': TerminalKey.keyR,
+    'U': TerminalKey.keyU,
+    'W': TerminalKey.keyW,
+    'Z': TerminalKey.keyZ,
+  };
+
+  TerminalKey _terminalKeyFromChar(String char) =>
+      _ctrlKeyMap[char] ?? TerminalKey.keyA;
 }
 
 class _SelectModeButton extends StatelessWidget {
