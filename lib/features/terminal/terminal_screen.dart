@@ -146,15 +146,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         }
       });
 
-      // 状態ベースでタブクリーンアップ判定:
-      // 再接続中のセッションがなくなり、全 disconnected ならクリーンアップ
-      _scheduleCleanupCheck(0);
     }
-  }
-
-  void _scheduleCleanupCheck(int attempt) {
-    // 再接続が試行されるため、自動でタブを閉じない。
-    // ユーザーが手動でタブを閉じるか、接続画面に戻ることで対応する。
   }
 
   Future<void> _showConnectionPicker(BuildContext context, WidgetRef ref) async {
