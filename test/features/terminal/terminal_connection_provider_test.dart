@@ -936,4 +936,87 @@ void main() {
       expect(countingService.keepAliveCount, 1);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // _flushOutput() — batched terminal output behaviour
+  //
+  // SSH stdout chunks are accumulated in _outputBuffer and flushed in at most
+  // 16 KB chunks so the UI thread can render between large outputs (e.g.
+  // Claude Code on tmux).  During a resize-guard window, chunking is disabled
+  // to prevent tmux redraw corruption.
+  // -------------------------------------------------------------------------
+
+  group('_flushOutput() batched output', () {
+    late ProviderContainer container;
+    late TerminalConnectionNotifier notifier;
+    late Terminal terminal;
+
+    setUp(() {
+      container = makeContainer();
+      notifier = container.read(
+        terminalConnectionProvider('flush-test').notifier,
+      );
+      terminal = Terminal(maxLines: 1000);
+    });
+
+    tearDown(() => container.dispose());
+
+    // Empty buffer → nothing to do, buffer stays empty.
+    test('empty buffer is a no-op', () {
+      final remaining = notifier.flushOutputForTesting(terminal, '');
+      expect(remaining, isEmpty);
+    });
+
+    // Data <= 16 KB → written all at once, buffer cleared.
+    test('small data (<=16 KB) is written all at once', () {
+      final data = 'A' * (16 * 1024); // exactly 16 KB
+      final remaining = notifier.flushOutputForTesting(terminal, data);
+      expect(remaining, isEmpty,
+          reason: 'buffer must be empty after flushing small data');
+    });
+
+    // Data one byte over 16 KB → first chunk written, rest stays in buffer.
+    test('large data (>16 KB) splits into 16 KB chunk + remainder', () {
+      const chunkSize = 16 * 1024;
+      final data = 'B' * (chunkSize + 500); // 16 KB + 500 bytes
+      final remaining = notifier.flushOutputForTesting(terminal, data);
+      expect(remaining.length, 500,
+          reason: 'exactly 500 bytes should remain after first 16 KB chunk');
+    });
+
+    // Much larger data → first chunk written, large remainder in buffer.
+    test('very large data (100 KB) leaves 84 KB remainder after first flush',
+        () {
+      const chunkSize = 16 * 1024;
+      const totalSize = 100 * 1024;
+      final data = 'C' * totalSize;
+      final remaining = notifier.flushOutputForTesting(terminal, data);
+      expect(remaining.length, totalSize - chunkSize,
+          reason: 'first 16 KB written, remaining ${totalSize - chunkSize} in buffer');
+    });
+
+    // Resize guard active → even large data is written all at once (no split).
+    test('resize guard suppresses chunking for large data', () {
+      const chunkSize = 16 * 1024;
+      final data = 'D' * (chunkSize + 1000); // > 16 KB
+
+      notifier.setResizeGuardActiveForTesting(true);
+      final remaining = notifier.flushOutputForTesting(terminal, data);
+
+      expect(remaining, isEmpty,
+          reason: 'resize guard must disable chunking — all data written at once');
+    });
+
+    // Resize guard inactive → normal chunking applies.
+    test('resize guard false restores normal chunking', () {
+      const chunkSize = 16 * 1024;
+      final data = 'E' * (chunkSize + 200);
+
+      notifier.setResizeGuardActiveForTesting(false);
+      final remaining = notifier.flushOutputForTesting(terminal, data);
+
+      expect(remaining.length, 200,
+          reason: '200 bytes should remain after first chunk when guard is off');
+    });
+  });
 }

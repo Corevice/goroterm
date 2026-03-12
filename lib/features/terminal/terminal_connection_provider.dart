@@ -529,6 +529,22 @@ class TerminalConnectionNotifier
   @visibleForTesting
   void triggerScheduleReconnectForTesting() => _scheduleReconnect();
 
+  /// テスト専用: _resizeGuardActive を直接設定する。
+  @visibleForTesting
+  void setResizeGuardActiveForTesting(bool value) =>
+      _resizeGuardActive = value;
+
+  /// テスト専用: 出力バッファにデータをセットして _flushOutput を呼び出し、
+  /// フラッシュ後の残バッファ内容を返す。
+  /// 戻り値が空なら全データが書き込まれた、非空なら残りがある（チャンク分割）。
+  @visibleForTesting
+  String flushOutputForTesting(Terminal terminal, String data) {
+    _outputBuffer.clear();
+    _outputBuffer.write(data);
+    _flushOutput(terminal);
+    return _outputBuffer.toString();
+  }
+
   /// Cancels SSH subscriptions and disposes resources without clearing state.
   void _cleanupConnections() {
     AppLogger.instance.log('[SSH][$arg] cleaning up connections');
