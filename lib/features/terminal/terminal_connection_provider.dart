@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../core/navigation/navigator_key.dart';
+import '../../core/notification/notification_service.dart';
 import '../../core/ssh/connection_config.dart';
 import '../../core/ssh/ssh_client_service.dart';
 import '../../core/utils/app_logger.dart';
@@ -28,6 +30,7 @@ class TerminalConnectionState {
     this.hostLabel,
     this.errorMessage,
     this.channelManager,
+    this.shellExited = false,
   });
 
   final ConnectionStatus status;
@@ -36,6 +39,10 @@ class TerminalConnectionState {
   final String? errorMessage;
   final SshChannelManager? channelManager;
 
+  /// シェル（PTY）が正常終了したかどうか。
+  /// `exit` コマンド等でシェルが終了すると true になる。
+  final bool shellExited;
+
   TerminalConnectionState copyWith({
     ConnectionStatus? status,
     Terminal? terminal,
@@ -43,6 +50,7 @@ class TerminalConnectionState {
     String? errorMessage,
     SshChannelManager? channelManager,
     bool clearChannelManager = false,
+    bool? shellExited,
   }) {
     return TerminalConnectionState(
       status: status ?? this.status,
@@ -52,6 +60,7 @@ class TerminalConnectionState {
       channelManager: clearChannelManager
           ? null
           : (channelManager ?? this.channelManager),
+      shellExited: shellExited ?? this.shellExited,
     );
   }
 }
@@ -96,6 +105,18 @@ class TerminalConnectionNotifier
   // tmux のリドロー出力を分割すると表示崩れの原因になるため。
   Timer? _resizeGuardTimer;
   bool _resizeGuardActive = false;
+
+  // コマンド完了通知: バックグラウンド時に出力が一定時間止まったら通知
+  Timer? _idleNotifyTimer;
+  int _outputBytesSinceLastIdle = 0;
+  static const int _idleNotifyThresholdBytes = 256; // この量以上出力があった後の静止を検知
+  static const Duration _idleNotifyDelay = Duration(seconds: 5);
+  static bool _isAppInBackground = false;
+
+  /// アプリのライフサイクル状態を更新する（TerminalScreen から呼ばれる）
+  static void setAppInBackground(bool value) {
+    _isAppInBackground = value;
+  }
 
   @override
   TerminalConnectionState build(String arg) {
@@ -203,6 +224,7 @@ class TerminalConnectionNotifier
     final terminal = existingTerminal ??
         Terminal(
           maxLines: 10000,
+          onPrivateOSC: _handlePrivateOSC,
           onOutput: (data) {
             _channelManager?.ptySession?.write(utf8.encoder.convert(data));
           },
@@ -223,14 +245,29 @@ class TerminalConnectionNotifier
     final session = await _channelManager!.openPtyChannel();
 
     _shellOutputReceived = false;
-    _stdoutSubscription = session.stdout.listen((data) {
-      _shellOutputReceived = true;
-      _outputBuffer.write(utf8.decode(data, allowMalformed: true));
-      _flushTimer ??= Timer(
-        const Duration(milliseconds: 16),
-        () => _flushOutput(terminal),
-      );
-    });
+    _stdoutSubscription = session.stdout.listen(
+      (data) {
+        _shellOutputReceived = true;
+        _outputBuffer.write(utf8.decode(data, allowMalformed: true));
+        _flushTimer ??= Timer(
+          const Duration(milliseconds: 16),
+          () => _flushOutput(terminal),
+        );
+        // コマンド完了通知: 出力量を追跡し、静止タイマーをリセット
+        _outputBytesSinceLastIdle += data.length;
+        _resetIdleNotifyTimer();
+      },
+      onDone: () {
+        // PTY の stdout ストリームが閉じた = シェルが終了した可能性。
+        // SSH 切断（ネットワーク断）の場合も onDone が発火するため、
+        // SSH 接続がまだ生きているか確認してからシェル終了と判断する。
+        if (state.status == ConnectionStatus.connected &&
+            (_sshService?.isConnected ?? false)) {
+          AppLogger.instance.log('[SSH][$arg] shell exited (stdout done)');
+          state = state.copyWith(shellExited: true);
+        }
+      },
+    );
 
     // 現在のクライアント参照を保持し、古いクライアントの done イベントを無視する
     final currentClient = client;
@@ -292,11 +329,19 @@ class TerminalConnectionNotifier
   }
 
   /// 自動再接続をスケジュールする。指数バックオフ (3s, 6s, 12s, 24s, 30s, 30s, ...)。
-  /// リトライ回数に上限はなく、接続が復活するまで試行し続ける。
+  /// 最大10回までリトライし、それを超えたら諦める。
   void _scheduleReconnect() {
     if (_config == null) return;
 
     _retryCount++;
+    if (_retryCount > 10) {
+      AppLogger.instance.log('[SSH][$arg] max retries (10) reached, giving up');
+      state = state.copyWith(
+        status: ConnectionStatus.disconnected,
+        errorMessage: 'Connection lost. Tap to reconnect.',
+      );
+      return;
+    }
     // 指数バックオフ: 3s → 6s → 12s → 24s → 30s（上限）
     // ビットシフト量を 10 に上限を設けることで AOT 環境での整数オーバーフローを防ぐ
     // (2^10 = 1024, 3*1024 = 3072 >> 30 なので上限には影響しない)
@@ -529,6 +574,39 @@ class TerminalConnectionNotifier
   @visibleForTesting
   void triggerScheduleReconnectForTesting() => _scheduleReconnect();
 
+  /// テスト専用: _onDisconnected() を直接呼び出す。
+  /// status が connecting / disconnected / _isReconnecting のガードをユニットテストで検証するために使用する。
+  @visibleForTesting
+  void triggerOnDisconnectedForTesting() => _onDisconnected();
+
+  /// テスト専用: _isReconnecting フラグを直接設定する。
+  /// _isReconnecting == true のガード（再接続中の二重切断防止）をテストするために使用する。
+  @visibleForTesting
+  void setIsReconnectingForTesting(bool value) => _isReconnecting = value;
+
+  /// テスト専用: _sshService を null にする。
+  /// checkConnection() の「_sshService == null → _onDisconnected()」パス (line 475-478) を
+  /// 実際の SSH 接続なしにテストするために使用する。
+  @visibleForTesting
+  void clearSshServiceForTesting() => _sshService = null;
+
+  /// テスト専用: _tmuxSessionName を直接設定する。
+  /// _autoReattachTmux() の挙動を検証するために使用する。
+  @visibleForTesting
+  void setTmuxSessionNameForTesting(String? name) => _tmuxSessionName = name;
+
+  /// テスト専用: _channelManager を直接注入する。
+  /// _autoReattachTmux() の resizePty 呼び出しを mock で検証するために使用する。
+  @visibleForTesting
+  void setChannelManagerForTesting(SshChannelManager? manager) =>
+      _channelManager = manager;
+
+  /// テスト専用: _autoReattachTmux() を直接呼び出す。
+  /// 再接続後の tmux リアタッチ挙動をテストするために使用する。
+  @visibleForTesting
+  void autoReattachTmuxForTesting(Terminal terminal) =>
+      _autoReattachTmux(terminal);
+
   /// テスト専用: _resizeGuardActive を直接設定する。
   @visibleForTesting
   void setResizeGuardActiveForTesting(bool value) =>
@@ -546,10 +624,44 @@ class TerminalConnectionNotifier
   }
 
   /// Cancels SSH subscriptions and disposes resources without clearing state.
+  /// OSC 52 クリップボード書き込みを処理する。
+  /// Claude Code の /copy コマンド等が ESC ] 52 ; c ; [base64] ST を送信する。
+  void _handlePrivateOSC(String code, List<String> args) {
+    AppLogger.instance.log('[SSH][$arg] onPrivateOSC: code=$code, args.length=${args.length}');
+    if (code != '52') return;
+    if (args.length < 2) return;
+    // args[0] = clipboard target (e.g. "c"), args[1] = base64 data
+    final b64 = args[1];
+    if (b64.isEmpty) return;
+    try {
+      final decoded = utf8.decode(base64Decode(b64));
+      Clipboard.setData(ClipboardData(text: decoded));
+      AppLogger.instance.log('[SSH][$arg] OSC 52: copied ${decoded.length} chars to clipboard');
+    } catch (e) {
+      AppLogger.instance.log('[SSH][$arg] OSC 52 decode error: $e');
+    }
+  }
+
+  void _resetIdleNotifyTimer() {
+    _idleNotifyTimer?.cancel();
+    if (_outputBytesSinceLastIdle < _idleNotifyThresholdBytes) return;
+
+    _idleNotifyTimer = Timer(_idleNotifyDelay, () {
+      if (_isAppInBackground && _outputBytesSinceLastIdle >= _idleNotifyThresholdBytes) {
+        final host = _config?.host ?? 'server';
+        NotificationService.instance.showCommandFinished(host: host);
+      }
+      _outputBytesSinceLastIdle = 0;
+    });
+  }
+
   void _cleanupConnections() {
     AppLogger.instance.log('[SSH][$arg] cleaning up connections');
     _keepAliveFailCount = 0;
     _shellOutputReceived = false;
+    _idleNotifyTimer?.cancel();
+    _idleNotifyTimer = null;
+    _outputBytesSinceLastIdle = 0;
     _flushTimer?.cancel();
     _flushTimer = null;
     _resizeGuardTimer?.cancel();
