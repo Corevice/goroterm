@@ -68,6 +68,8 @@ class SshClientService {
       throw const AuthenticationError('Authentication aborted');
     } on TimeoutException {
       throw const NetworkError('Connection timed out');
+    } catch (e) {
+      throw NetworkError('Connection failed: $e');
     }
   }
 

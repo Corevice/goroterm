@@ -302,6 +302,12 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
       if (mounted) {
         Navigator.of(context).pop();
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: $e')),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

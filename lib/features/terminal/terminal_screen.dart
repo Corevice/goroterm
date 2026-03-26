@@ -29,6 +29,7 @@ import '../../widgets/terminal_scroll_interceptor.dart';
 import '../claude_usage/claude_usage_dialog.dart';
 import '../server_monitor/server_monitor_dialog.dart';
 import '../../widgets/terminal_selection_toolbar.dart';
+import '../../core/platform/clipboard_image_helper.dart';
 
 /// Multi-session terminal screen. Manages tabs via [SessionManagerNotifier].
 class TerminalScreen extends ConsumerStatefulWidget {
@@ -994,6 +995,101 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     }
   }
 
+  /// クリップボードの画像を SFTP アップロードしてパスをペースト。
+  /// 画像がなければテキストペーストにフォールバック。
+  Future<void> _pasteClipboardImageOrText() async {
+    final connectionState =
+        ref.read(terminalConnectionProvider(widget.sessionId));
+
+    // macOS: クリップボードに画像があるか確認
+    final localPath = await ClipboardImageHelper.getClipboardImageFile();
+    if (localPath != null) {
+      await _uploadLocalFile(localPath, 'clipboard.png');
+      return;
+    }
+
+    // テキストフォールバック
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data?.text != null && data!.text!.isNotEmpty) {
+      connectionState.terminal?.paste(data.text!);
+    }
+  }
+
+  /// ローカルファイルを SFTP アップロードしてパスをペースト。
+  Future<void> _uploadLocalFile(String localPath, String fileName) async {
+    final connectionState =
+        ref.read(terminalConnectionProvider(widget.sessionId));
+    final channelManager = connectionState.channelManager;
+    if (channelManager == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('SSH not connected')),
+        );
+      }
+      return;
+    }
+
+    final ts = _timestamp();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Uploading: $fileName'),
+          duration: const Duration(seconds: 30),
+        ),
+      );
+    }
+
+    try {
+      final sftp = await channelManager.openSftpChannel();
+
+      try {
+        await sftp.stat(_uploadDir);
+      } catch (_) {
+        await sftp.mkdir(_uploadDir);
+      }
+
+      final remotePath = '$_uploadDir/${ts}_$fileName';
+      final localFile = File(localPath);
+
+      final remoteFile = await sftp.open(
+        remotePath,
+        mode: SftpFileOpenMode.write |
+            SftpFileOpenMode.create |
+            SftpFileOpenMode.truncate,
+      );
+      try {
+        final inputStream =
+            localFile.openRead().map((chunk) => Uint8List.fromList(chunk));
+        await remoteFile.write(inputStream).done;
+      } finally {
+        await remoteFile.close();
+      }
+
+      // 一時ファイル削除
+      try {
+        await localFile.delete();
+      } catch (_) {}
+
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(content: Text('Ready: $remotePath')),
+          );
+        connectionState.terminal?.paste(remotePath);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(content: Text('Upload failed: $e')),
+          );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context); // AutomaticKeepAliveClientMixin required
@@ -1100,13 +1196,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
               : null,
           onImagePaste: connectionState.terminal != null ? _pasteMedia : null,
           onClipboardPaste: connectionState.terminal != null
-              ? () async {
-                  final data =
-                      await Clipboard.getData(Clipboard.kTextPlain);
-                  if (data?.text != null && data!.text!.isNotEmpty) {
-                    connectionState.terminal?.paste(data.text!);
-                  }
-                }
+              ? _pasteClipboardImageOrText
               : null,
           onScrollToTop: () {
             final terminal = connectionState.terminal;

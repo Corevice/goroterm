@@ -21,7 +21,11 @@ class KeepaliveSSHSocket implements SSHSocket {
     final socket = await Socket.connect(host, port, timeout: timeout);
 
     // TCP_NODELAY（dartssh2 デフォルトと同じ）
-    socket.setOption(SocketOption.tcpNoDelay, true);
+    try {
+      socket.setOption(SocketOption.tcpNoDelay, true);
+    } catch (e) {
+      debugPrint('[SSH] TCP_NODELAY setup FAILED: $e');
+    }
 
     // SO_KEEPALIVE を有効化（Linux: SOL_SOCKET=1, SO_KEEPALIVE=9）
     try {

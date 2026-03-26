@@ -1,6 +1,11 @@
 package com.example.terminal_ssh_app
 
+import android.content.ClipboardManager
 import android.content.ContentValues
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -11,15 +16,35 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 
 class MainActivity : FlutterActivity() {
     private val channel = "com.example.terminal_ssh_app/downloads"
+    private val clipboardChannel = "com.example.terminalSshApp/clipboard_image"
     private val scope = CoroutineScope(Dispatchers.Main)
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // クリップボード画像チャンネル
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, clipboardChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getClipboardImage" -> {
+                        scope.launch {
+                            try {
+                                val bytes = getClipboardImageBytes()
+                                result.success(bytes)
+                            } catch (e: Exception) {
+                                result.success(null)
+                            }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channel)
             .setMethodCallHandler { call, result ->
@@ -146,6 +171,37 @@ class MainActivity : FlutterActivity() {
                 sourceFile.delete()
                 destFile.name
             }
+        }
+    }
+
+    /// クリップボードから画像を PNG バイト列として取得。画像がなければ null。
+    private suspend fun getClipboardImageBytes(): ByteArray? {
+        return withContext(Dispatchers.IO) {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = clipboard.primaryClip ?: return@withContext null
+            if (clip.itemCount == 0) return@withContext null
+
+            val item = clip.getItemAt(0)
+            val uri: Uri = item.uri ?: return@withContext null
+
+            // URI から画像を読み取る
+            val bitmap: Bitmap = try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val source = ImageDecoder.createSource(contentResolver, uri)
+                    ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    }
+                } else {
+                    @Suppress("DEPRECATION")
+                    MediaStore.Images.Media.getBitmap(contentResolver, uri)
+                }
+            } catch (e: Exception) {
+                return@withContext null
+            }
+
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            stream.toByteArray()
         }
     }
 }
