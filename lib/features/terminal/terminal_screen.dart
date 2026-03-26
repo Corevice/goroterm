@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -620,6 +621,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     _terminalController.removeListener(_onSelectionChanged);
     widget.drawerClosedNotifier?.removeListener(_onDrawerClosed);
     _toolbarAutoHideTimer?.cancel();
+    _longPressSelectTimer?.cancel();
     _hideToolbar();
     _channelManagerSubscription?.close();
     _terminalController.dispose();
@@ -644,7 +646,11 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       _showToolbar();
     } else {
       _hideToolbar();
-      // 選択がクリアされたら選択モードを自動解除
+      // 選択がクリアされたら選択モード / 長押し選択を解除
+      if (_altSelectActive) {
+        _altSelectActive = false;
+        _terminalController.setSuspendPointerInput(false);
+      }
       _exitSelectMode();
     }
   }
@@ -688,17 +694,62 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     _toolbarOverlay = null;
   }
 
+  bool _altSelectActive = false;
+  Timer? _longPressSelectTimer;
+
+  void _onPointerDownForSelection(PointerDownEvent event) {
+    final isMouse = event.kind == PointerDeviceKind.mouse;
+    final optionPressed = Platform.isMacOS &&
+        isMouse &&
+        HardwareKeyboard.instance.isAltPressed;
+
+    if (optionPressed || _isSelectMode) {
+      if (!_altSelectActive) {
+        _altSelectActive = true;
+        _terminalController.setSuspendPointerInput(true);
+      }
+      return;
+    }
+
+    // 長押し (400ms) で自動的に選択モードに入る
+    _longPressSelectTimer?.cancel();
+    _longPressSelectTimer = Timer(const Duration(milliseconds: 400), () {
+      if (!_altSelectActive && !_isSelectMode) {
+        _altSelectActive = true;
+        _terminalController.setSuspendPointerInput(true);
+      }
+    });
+  }
+
+  void _onPointerUpForSelection(PointerUpEvent event) {
+    _longPressSelectTimer?.cancel();
+    _longPressSelectTimer = null;
+
+    if (!_altSelectActive) return;
+    if (_terminalController.selection != null) {
+      // 選択中 — タップで選択解除されるまで維持
+      return;
+    }
+    _altSelectActive = false;
+    if (!_isSelectMode) {
+      _terminalController.setSuspendPointerInput(false);
+    }
+  }
+
+  PointerInputs get _defaultPointerInputs {
+    return const PointerInputs({PointerInput.tap});
+  }
+
   void _toggleSelectMode() {
     setState(() {
       _isSelectMode = !_isSelectMode;
       if (_isSelectMode) {
         // 選択モード: tmux へのマウスイベント転送を無効化
-        // → 長押しで xterm ネイティブのテキスト選択が動作
+        // → 長押し / ドラッグで xterm ネイティブのテキスト選択が動作
         _terminalController.setPointerInputs(const PointerInputs.none());
       } else {
         // 通常モード: タップイベントを tmux に転送
-        _terminalController
-            .setPointerInputs(const PointerInputs({PointerInput.tap}));
+        _terminalController.setPointerInputs(_defaultPointerInputs);
         _terminalController.clearSelection();
         _hideToolbar();
       }
@@ -709,8 +760,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     if (!_isSelectMode) return;
     setState(() {
       _isSelectMode = false;
-      _terminalController
-          .setPointerInputs(const PointerInputs({PointerInput.tap}));
+      _terminalController.setPointerInputs(_defaultPointerInputs);
     });
   }
 
@@ -1090,6 +1140,55 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     }
   }
 
+  static const _terminalTheme = TerminalTheme(
+    cursor: Color(0xFFFFFFFF),
+    selection: Color(0x80FFFFFF),
+    foreground: Color(0xFFFFFFFF),
+    background: Color(0xFF000000),
+    black: Color(0xFF000000),
+    white: Color(0xFFFFFFFF),
+    red: Color(0xFFCD3131),
+    green: Color(0xFF0DBC79),
+    yellow: Color(0xFFE5E510),
+    blue: Color(0xFF2472C8),
+    magenta: Color(0xFFBC3FBC),
+    cyan: Color(0xFF11A8CD),
+    brightBlack: Color(0xFF666666),
+    brightRed: Color(0xFFF14C4C),
+    brightGreen: Color(0xFF23D18B),
+    brightYellow: Color(0xFFF5F543),
+    brightBlue: Color(0xFF3B8EEA),
+    brightMagenta: Color(0xFFD670D6),
+    brightCyan: Color(0xFF29B8DB),
+    brightWhite: Color(0xFFFFFFFF),
+    searchHitBackground: Color(0xFFFFDF5D),
+    searchHitBackgroundCurrent: Color(0xFFFF9632),
+    searchHitForeground: Color(0xFF000000),
+  );
+
+  Widget _buildTerminalView(
+    TerminalConnectionState connectionState,
+    double fontSize,
+  ) {
+    return TerminalView(
+      connectionState.terminal!,
+      controller: _terminalController,
+      focusNode: _focusNode,
+      autofocus: true,
+      autoResize: true,
+      deleteDetection: true,
+      simulateScroll: true,
+      textScaler: TextScaler.linear(fontSize / 14.0),
+      scrollController: _scrollController,
+      onTapUp: (_, __) {
+        if (_terminalController.selection == null) {
+          _hideToolbar();
+        }
+      },
+      theme: _terminalTheme,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context); // AutomaticKeepAliveClientMixin required
@@ -1135,47 +1234,12 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
                   child: TerminalScrollInterceptor(
                     terminal: connectionState.terminal!,
                     disabled: _isSelectMode,
-                    child: TerminalView(
-                      connectionState.terminal!,
-                      controller: _terminalController,
-                      focusNode: _focusNode,
-                      autofocus: true,
-                      autoResize: true,
-                      deleteDetection: true,
-                      simulateScroll: false,
-                      textScaler: TextScaler.linear(fontSize / 14.0),
-                      scrollController: _scrollController,
-                      onTapUp: (_, __) {
-                        if (_terminalController.selection == null) {
-                          _hideToolbar();
-                        }
-                      },
-                      theme: const TerminalTheme(
-                      cursor: Color(0xFFFFFFFF),
-                      selection: Color(0x80FFFFFF),
-                      foreground: Color(0xFFFFFFFF),
-                      background: Color(0xFF000000),
-                      black: Color(0xFF000000),
-                      white: Color(0xFFFFFFFF),
-                      red: Color(0xFFCD3131),
-                      green: Color(0xFF0DBC79),
-                      yellow: Color(0xFFE5E510),
-                      blue: Color(0xFF2472C8),
-                      magenta: Color(0xFFBC3FBC),
-                      cyan: Color(0xFF11A8CD),
-                      brightBlack: Color(0xFF666666),
-                      brightRed: Color(0xFFF14C4C),
-                      brightGreen: Color(0xFF23D18B),
-                      brightYellow: Color(0xFFF5F543),
-                      brightBlue: Color(0xFF3B8EEA),
-                      brightMagenta: Color(0xFFD670D6),
-                      brightCyan: Color(0xFF29B8DB),
-                      brightWhite: Color(0xFFFFFFFF),
-                      searchHitBackground: Color(0xFFFFDF5D),
-                      searchHitBackgroundCurrent: Color(0xFFFF9632),
-                      searchHitForeground: Color(0xFF000000),
+                    child: Listener(
+                      onPointerDown: _onPointerDownForSelection,
+                      onPointerUp: _onPointerUpForSelection,
+                      child: _buildTerminalView(
+                        connectionState, fontSize),
                     ),
-                  ),
                   ),
                 )
               : const Center(

@@ -92,6 +92,7 @@ class TerminalConnectionNotifier
   bool _isActiveKeepAliveRunning = false;
   int _keepAliveFailCount = 0;
 
+
   // Batch output buffer: accumulates SSH stdout chunks and flushes periodically.
   // Each flush writes at most _flushChunkSize bytes to terminal.write().
   // If more data remains, the next flush is scheduled after a short delay
@@ -225,9 +226,7 @@ class TerminalConnectionNotifier
         Terminal(
           maxLines: 10000,
           onPrivateOSC: _handlePrivateOSC,
-          onOutput: (data) {
-            _channelManager?.ptySession?.write(utf8.encoder.convert(data));
-          },
+          onOutput: _onTerminalOutput,
           onResize: (width, height, pixelWidth, pixelHeight) {
             _channelManager?.resizePty(width, height);
             // リサイズ後 1500ms はチャンク分割を無効化
@@ -653,6 +652,11 @@ class TerminalConnectionNotifier
       }
       _outputBytesSinceLastIdle = 0;
     });
+  }
+
+  /// Terminal.onOutput コールバック。
+  void _onTerminalOutput(String data) {
+    _channelManager?.ptySession?.write(utf8.encoder.convert(data));
   }
 
   void _cleanupConnections() {

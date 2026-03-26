@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/gestures.dart';
@@ -11,18 +12,11 @@ import 'package:xterm/xterm.dart';
 const _kWheelUpButton = 64;
 const _kWheelDownButton = 65;
 
-/// alt buffer（tmux 等）使用時のタッチスクロールを実現するウィジェット。
+/// alt buffer（tmux 等）使用時のスクロールを実現するウィジェット。
 ///
-/// [Listener] で raw ポインタイベントを **監視** するだけで、
-/// 子ウィジェット（TerminalView）への伝播は一切妨げない。
-/// これにより:
-///   - TerminalView の内部タップ処理（キーボード表示）がそのまま動作
-///   - テキスト選択も正常に動作
-///   - ウィジェットツリーが alt buffer 状態で変化しないためリビルド問題なし
-///
-/// alt buffer 時は垂直ドラッグを検出して terminal.mouseInput() に変換。
-/// xterm 内部の Scrollable は alt buffer では maxScrollExtent=0 のため
-/// ドラッグしても何も起きず、本ウィジェットの mouseInput が唯一の効果。
+/// タッチスクロール: [Listener] で raw ポインタイベントを監視し変換。
+/// マウスホイール/トラックパッド: [PointerSignalResolver] で xterm 内部の
+/// InfiniteScrollView より先にイベントを獲得し、正しい wheel event を送信。
 class TerminalScrollInterceptor extends StatefulWidget {
   const TerminalScrollInterceptor({
     super.key,
@@ -35,7 +29,6 @@ class TerminalScrollInterceptor extends StatefulWidget {
   final Widget child;
 
   /// true の場合、スクロールインターセプトを無効化する。
-  /// テキスト選択モード時に使用。
   final bool disabled;
 
   @override
@@ -45,7 +38,7 @@ class TerminalScrollInterceptor extends StatefulWidget {
 
 class _TerminalScrollInterceptorState
     extends State<TerminalScrollInterceptor> {
-  // ドラッグ追跡用の状態
+  // ドラッグ追跡用の状態（タッチ用）
   int? _activePointerId;
   double _accumulatedDelta = 0.0;
   Offset _lastPointerPosition = Offset.zero;
@@ -54,6 +47,9 @@ class _TerminalScrollInterceptorState
   bool _isVerticalDrag = false;
   bool _directionDecided = false;
   Offset _dragStartPosition = Offset.zero;
+
+  // マウスホイール用アキュムレータ
+  double _wheelAccumulator = 0.0;
 
   // 1行あたりのピクセル数（フォントサイズに依存）
   double get _lineHeight {
@@ -66,23 +62,108 @@ class _TerminalScrollInterceptorState
 
   @override
   Widget build(BuildContext context) {
-    // Listener は子へのイベント伝播を妨げない。
-    // TerminalView は通常通り全ポインタイベントを受信する。
-    return Listener(
-      onPointerDown: _onPointerDown,
-      onPointerMove: _onPointerMove,
-      onPointerUp: _onPointerUp,
-      onPointerCancel: _onPointerCancel,
-      child: widget.child,
+    // NotificationListener で内部 Scrollable の通知をキャッチして
+    // alt buffer 中は握りつぶし、代わりに正しい wheel event を送る。
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onScrollNotification,
+      child: Listener(
+        onPointerDown: _onPointerDown,
+        onPointerMove: _onPointerMove,
+        onPointerUp: _onPointerUp,
+        onPointerCancel: _onPointerCancel,
+        onPointerSignal: _onPointerSignal,
+        child: widget.child,
+      ),
     );
+  }
+
+  /// xterm 内部 InfiniteScrollView の ScrollNotification を監視。
+  /// alt buffer 中のスクロールを正しい wheel event に変換する。
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (widget.disabled) return false;
+    if (!widget.terminal.isUsingAltBuffer) return false;
+
+    if (notification is ScrollUpdateNotification) {
+      final dy = notification.scrollDelta ?? 0.0;
+      if (dy == 0) return true;
+
+      final lineHeight = _lineHeight;
+      _wheelAccumulator += dy;
+
+      while (_wheelAccumulator.abs() >= lineHeight) {
+        final isUp = _wheelAccumulator < 0;
+        _wheelAccumulator += isUp ? lineHeight : -lineHeight;
+
+        // InfiniteScrollView はセル座標を提供しないので中央を使用
+        final renderBox = context.findRenderObject() as RenderBox?;
+        final w = renderBox?.size.width ?? 400;
+        final h = renderBox?.size.height ?? 300;
+        final cellX = max(1, (w / 2 / (lineHeight * 0.6)).floor() + 1);
+        final cellY = max(1, (h / 2 / lineHeight).floor() + 1);
+
+        final handled = _sendWheelEvent(isUp, cellX, cellY);
+        if (!handled) {
+          widget.terminal.keyInput(
+            isUp ? TerminalKey.arrowUp : TerminalKey.arrowDown,
+          );
+        }
+      }
+    }
+    // true を返して内部の scroll を消費（visual scroll を防止）
+    return true;
+  }
+
+  /// マウスホイール / トラックパッドスクロール。
+  /// alt buffer 使用中は PointerSignalResolver に登録して
+  /// xterm 内部の InfiniteScrollView より先にイベントを獲得する。
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    if (widget.disabled) return;
+
+    // Listener.onPointerSignal はデスクトップでは
+    // 内部 Scrollable が先に resolve するため呼ばれないことがある。
+    // 実際のスクロール処理は _onScrollNotification で行う。
+
+    if (!widget.terminal.isUsingAltBuffer) return;
+
+    // PointerSignalResolver で先に登録し、xterm 内部の Scrollable に勝つ
+    GestureBinding.instance.pointerSignalResolver.register(
+      event,
+      (PointerSignalEvent resolvedEvent) {
+        _handleWheelScroll(resolvedEvent as PointerScrollEvent);
+      },
+    );
+  }
+
+  void _handleWheelScroll(PointerScrollEvent event) {
+    final dy = event.scrollDelta.dy;
+    if (dy == 0) return;
+
+    final lineHeight = _lineHeight;
+    _wheelAccumulator += dy;
+
+    while (_wheelAccumulator.abs() >= lineHeight) {
+      final isUp = _wheelAccumulator < 0;
+      _wheelAccumulator += isUp ? lineHeight : -lineHeight;
+
+      final cellX =
+          max(1, (event.localPosition.dx / (lineHeight * 0.6)).floor() + 1);
+      final cellY =
+          max(1, (event.localPosition.dy / lineHeight).floor() + 1);
+
+      final handled = _sendWheelEvent(isUp, cellX, cellY);
+      if (!handled) {
+        widget.terminal.keyInput(
+          isUp ? TerminalKey.arrowUp : TerminalKey.arrowDown,
+        );
+      }
+    }
   }
 
   void _onPointerDown(PointerDownEvent event) {
     // タッチのみ処理（マウスは無視）
     if (event.kind != PointerDeviceKind.touch) return;
-    // 選択モード中はスクロールインターセプトしない
     if (widget.disabled) return;
-    // alt buffer でなければ無視（normal buffer は xterm 内部 Scrollable に任せる）
     if (!widget.terminal.isUsingAltBuffer) return;
 
     _activePointerId = event.pointer;
@@ -104,7 +185,6 @@ class _TerminalScrollInterceptorState
     if (!_directionDecided) {
       final dx = (event.localPosition.dx - _dragStartPosition.dx).abs();
       final dy = (event.localPosition.dy - _dragStartPosition.dy).abs();
-      // 閾値: 10px
       if (dx < 10 && dy < 10) return;
       _directionDecided = true;
       _isVerticalDrag = dy > dx;
@@ -121,25 +201,15 @@ class _TerminalScrollInterceptorState
     _accumulatedDelta += dy;
 
     final lineHeight = _lineHeight;
-    // 蓄積デルタが 1 行分を超えたらスクロールイベントを送信
     while (_accumulatedDelta.abs() >= lineHeight) {
-      // isUp: アキュムレータ収束用の方向フラグ（変更禁止）
-      // _accumulatedDelta > 0 → 指を下にスワイプ → コンテンツを上へ → wheelUp
-      // _accumulatedDelta < 0 → 指を上にスワイプ → コンテンツを下へ → wheelDown
       final isUp = _accumulatedDelta < 0;
       _accumulatedDelta += isUp ? lineHeight : -lineHeight;
 
-      // ポインタ位置からセル座標を概算（1-based for protocol）
       final cellX =
           max(1, (event.localPosition.dx / (lineHeight * 0.6)).floor() + 1);
       final cellY = max(1, (event.localPosition.dy / lineHeight).floor() + 1);
 
-      // 方向反転: isUp はアキュムレータ用なので、ホイールイベントは逆にする
-      // 指を下にスワイプ(isUp=false) → 上にスクロール(wheelUp=true)
-      // 指を上にスワイプ(isUp=true) → 下にスクロール(wheelUp=false)
       final handled = _sendWheelEvent(!isUp, cellX, cellY);
-      // tmux のマウスモードが OFF の場合のフォールバック:
-      // arrow key を送信（copy mode 内では有効）
       if (!handled) {
         widget.terminal.keyInput(
           !isUp ? TerminalKey.arrowUp : TerminalKey.arrowDown,
@@ -161,12 +231,9 @@ class _TerminalScrollInterceptorState
   }
 
   /// 正しいボタン ID でマウスホイールイベントを送信する。
-  /// xterm 4.0.0 の mouseInput() はボタン ID にバグがあるため、
-  /// ここで正しいエスケープシーケンスを直接生成する。
   bool _sendWheelEvent(bool isUp, int x, int y) {
     final terminal = widget.terminal;
 
-    // マウスモードが none か clickOnly なら処理しない
     final mouseMode = terminal.mouseMode;
     if (mouseMode == MouseMode.none || mouseMode == MouseMode.clickOnly) {
       return false;
@@ -178,19 +245,16 @@ class _TerminalScrollInterceptorState
     String seq;
     switch (reportMode) {
       case MouseReportMode.sgr:
-        // SGR format: \x1b[<button;x;yM
         seq = '\x1b[<$buttonId;$x;${y}M';
         break;
       case MouseReportMode.normal:
       case MouseReportMode.utf:
-        // Normal/UTF format: \x1b[M + char(32+button) + char(32+x) + char(32+y)
         final btn = String.fromCharCode(32 + buttonId);
         final col = String.fromCharCode(32 + x);
         final row = String.fromCharCode(32 + y);
         seq = '\x1b[M$btn$col$row';
         break;
       case MouseReportMode.urxvt:
-        // URxvt format: \x1b[button;x;yM
         seq = '\x1b[${32 + buttonId};$x;${y}M';
         break;
     }
