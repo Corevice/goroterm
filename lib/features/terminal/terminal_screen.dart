@@ -1176,7 +1176,10 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       focusNode: _focusNode,
       autofocus: true,
       autoResize: true,
-      deleteDetection: true,
+      // macOS: deleteDetection=false にして _initEditingState を空文字列にする。
+      // "  " パディングが Google IME で IME 確定時にテキスト二重化を引き起こすため。
+      // macOS はハードウェアキーボードなので backspace は KeyEvent で検出される。
+      deleteDetection: !Platform.isMacOS,
       simulateScroll: true,
       textScaler: TextScaler.linear(fontSize / 14.0),
       scrollController: _scrollController,
