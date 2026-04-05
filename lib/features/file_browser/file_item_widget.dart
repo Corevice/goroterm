@@ -2,6 +2,7 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/utils/format_utils.dart';
 import 'file_browser_provider.dart';
 
 /// Displays a single file or directory row with contextual actions.

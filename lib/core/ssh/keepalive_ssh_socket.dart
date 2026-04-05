@@ -4,6 +4,20 @@ import 'dart:io';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/foundation.dart';
 
+// SO_KEEPALIVE option number at SOL_SOCKET level (platform-specific)
+const _soKeepaliveLinux = 9; // Linux/Android
+const _soKeepaliveDarwin = 8; // macOS/iOS (0x0008)
+
+// TCP keepalive tuning constants — Linux/Android (IPPROTO_TCP level)
+const _tcpKeepidle = 4; // TCP_KEEPIDLE: idle seconds before first probe
+const _tcpKeepintvl = 5; // TCP_KEEPINTVL: seconds between probes
+const _tcpKeepcnt = 6; // TCP_KEEPCNT: max unanswered probes
+
+// TCP keepalive tuning constants — macOS/iOS (IPPROTO_TCP level)
+const _tcpKeepaliveDarwin = 0x10; // TCP_KEEPALIVE (equivalent to TCP_KEEPIDLE)
+const _tcpKeepintvlDarwin = 0x101; // TCP_KEEPINTVL on macOS/iOS
+const _tcpKeepcntDarwin = 0x102; // TCP_KEEPCNT on macOS/iOS
+
 /// TCP keepalive を有効にした SSH ソケット。
 /// OS カーネルレベルで keepalive パケットを送信するため、
 /// Dart イベントループがスロットルされたバックグラウンドでも接続が維持される。
@@ -27,37 +41,59 @@ class KeepaliveSSHSocket implements SSHSocket {
       debugPrint('[SSH] TCP_NODELAY setup FAILED: $e');
     }
 
-    // SO_KEEPALIVE を有効化（Linux: SOL_SOCKET=1, SO_KEEPALIVE=9）
+    applyKeepaliveOptions(socket);
+
+    return KeepaliveSSHSocket._(socket);
+  }
+
+  /// TCP keepalive オプションをソケットに適用する。
+  ///
+  /// SO_KEEPALIVE のオプション番号はプラットフォームで異なるため、
+  /// Linux/Android と macOS/iOS で別の定数を使用する。
+  /// TCP 詳細パラメータも同様にプラットフォーム別の定数で設定する。
+  @visibleForTesting
+  static void applyKeepaliveOptions(Socket socket) {
     try {
+      final isDarwin = Platform.isMacOS || Platform.isIOS;
+
+      // SO_KEEPALIVE を有効化
       socket.setRawOption(
-        RawSocketOption.fromBool(RawSocketOption.levelSocket, 9, true),
+        RawSocketOption.fromBool(
+          RawSocketOption.levelSocket,
+          isDarwin ? _soKeepaliveDarwin : _soKeepaliveLinux,
+          true,
+        ),
       );
 
-      // TCP_KEEPIDLE: 最初の keepalive パケットまでのアイドル時間（秒）
-      // 15 秒: モバイル NAT の最短タイムアウト (30秒) より十分短い値。
-      // NAT エントリが消える前に keepalive パケットが送信される。
-      // Linux/Android: IPPROTO_TCP=6, TCP_KEEPIDLE=4
-      socket.setRawOption(
-        RawSocketOption.fromInt(RawSocketOption.levelTcp, 4, 15),
-      );
+      if (isDarwin) {
+        // macOS/iOS: TCP_KEEPALIVE (idle), TCP_KEEPINTVL, TCP_KEEPCNT
+        socket.setRawOption(
+          RawSocketOption.fromInt(RawSocketOption.levelTcp, _tcpKeepaliveDarwin, 15),
+        );
+        socket.setRawOption(
+          RawSocketOption.fromInt(RawSocketOption.levelTcp, _tcpKeepintvlDarwin, 10),
+        );
+        socket.setRawOption(
+          RawSocketOption.fromInt(RawSocketOption.levelTcp, _tcpKeepcntDarwin, 5),
+        );
+      } else {
+        // Linux/Android: TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_KEEPCNT
+        // 15秒: モバイル NAT の最短タイムアウト (30秒) より十分短い値
+        socket.setRawOption(
+          RawSocketOption.fromInt(RawSocketOption.levelTcp, _tcpKeepidle, 15),
+        );
+        socket.setRawOption(
+          RawSocketOption.fromInt(RawSocketOption.levelTcp, _tcpKeepintvl, 10),
+        );
+        socket.setRawOption(
+          RawSocketOption.fromInt(RawSocketOption.levelTcp, _tcpKeepcnt, 5),
+        );
+      }
 
-      // TCP_KEEPINTVL: keepalive パケットの再送間隔（秒）
-      // Linux: IPPROTO_TCP=6, TCP_KEEPINTVL=5
-      socket.setRawOption(
-        RawSocketOption.fromInt(RawSocketOption.levelTcp, 5, 10),
-      );
-
-      // TCP_KEEPCNT: 応答がない場合の最大再送回数
-      // Linux: IPPROTO_TCP=6, TCP_KEEPCNT=6
-      socket.setRawOption(
-        RawSocketOption.fromInt(RawSocketOption.levelTcp, 6, 5),
-      );
       debugPrint('[SSH] TCP keepalive configured OK');
     } catch (e) {
       debugPrint('[SSH] TCP keepalive setup FAILED: $e');
     }
-
-    return KeepaliveSSHSocket._(socket);
   }
 
   @override

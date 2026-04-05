@@ -184,9 +184,11 @@ void main() {
       await tester.pumpWidget(_buildBrowser());
       await tester.pump();
 
-      // Long-press the file to open the context menu
+      // Long-press the file to open the context menu.
+      // Use pump with explicit duration instead of pumpAndSettle to avoid
+      // blocking on TextField cursor blink animation in the menu.
       await tester.longPress(find.text('notes.txt'));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.text('Rename'), findsOneWidget);
       expect(find.text('Delete'), findsOneWidget);
@@ -202,7 +204,7 @@ void main() {
       await tester.pump();
 
       await tester.longPress(find.text('projects'));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.text('Rename'), findsOneWidget);
       expect(find.text('Delete'), findsOneWidget);

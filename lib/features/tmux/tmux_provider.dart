@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/error/app_error.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
+import '../../core/utils/app_logger.dart';
 import '../../core/utils/shell_utils.dart';
 import '../terminal/terminal_connection_provider.dart';
 import 'tmux_session_model.dart';
@@ -36,15 +37,20 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     }
     try {
       final availability = await _checkAvailability(channelManager);
+      // Stale check: channelManager was replaced or cleared while we were working.
+      // Aborting prevents overwriting state set by a later setChannelManager() call.
+      if (_channelManager != channelManager) return;
       if (availability is TmuxNotInstalled) {
         state = AsyncData(TmuxState(availability: availability));
         return;
       }
       final sessions = await _fetchSessions(channelManager);
+      if (_channelManager != channelManager) return; // stale
       state = AsyncData(TmuxState(availability: availability, sessions: sessions));
     } catch (e, st) {
       // AsyncError にしない — 前回データを維持するか安全なデフォルトを使う
-      debugPrint('tmux _initializeState error: $e\n$st');
+      AppLogger.instance.log('tmux _initializeState error: $e\n$st');
+      if (_channelManager != channelManager) return; // stale: do not overwrite newer state
       if (prev != null) {
         state = AsyncData(prev);
       } else {
@@ -103,8 +109,9 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       final current = state.valueOrNull;
       if (current == null) return;
       final sessions = await _fetchSessions(channelManager);
-      // dispose 済みでないことを確認（channelManager が変わっていないか）
-      if (_channelManager != null) {
+      // stale check: 非同期待機中に channelManager が別インスタンスへ切り替わっていたら
+      // 古い結果で新しい channelManager の state を上書きしない。
+      if (_channelManager == channelManager) {
         state = AsyncData(current.copyWith(sessions: sessions));
       }
     } catch (_) {
@@ -112,53 +119,56 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     }
   }
 
-  Future<void> createSession(String name) async {
-    if (_isOperating) return;
-    _isOperating = true;
-    try {
-      final channelManager = _channelManager;
-      if (channelManager == null) return;
-      final escaped = shellEscape(name);
-      await _execCommand(channelManager, 'tmux new-session -d -s $escaped');
-      // 新規セッションの mouse mode を有効化（スワイプスクロール対応）
-      await _execCommand(
-        channelManager,
-        'tmux set-option -t $escaped mouse on',
-      ).catchError((_) {});
-    } finally {
-      _isOperating = false;
-      await _safeRefresh();
-    }
-  }
+  Future<void> createSession(String name) => _runExclusive(() async {
+        final channelManager = _channelManager;
+        if (channelManager == null) return;
+        final escaped = shellQuote(name);
+        await _execCommand(channelManager, 'tmux new-session -d -s $escaped');
+        // 新規セッションの mouse mode を有効化（スワイプスクロール対応）
+        await _execCommand(
+          channelManager,
+          'tmux set-option -t $escaped mouse on',
+        ).catchError((_) {});
+      });
 
-  Future<void> killSession(String name) async {
-    if (_isOperating) return;
-    _isOperating = true;
-    try {
-      final channelManager = _channelManager;
-      if (channelManager == null) return;
-      final escaped = shellEscape(name);
-      await _execCommand(channelManager, 'tmux kill-session -t $escaped');
-    } catch (_) {
-      // エラーは握り潰す（セッション不在等は正常扱い）
-    } finally {
-      _isOperating = false;
-      await _safeRefresh();
-    }
-  }
-
-  Future<void> renameSession(String oldName, String newName) async {
-    if (_isOperating) return;
-    _isOperating = true;
-    try {
-      final channelManager = _channelManager;
-      if (channelManager == null) return;
-      final escapedOld = shellEscape(oldName);
-      final escapedNew = shellEscape(newName);
-      await _execCommand(
-        channelManager,
-        'tmux rename-session -t $escapedOld $escapedNew',
+  Future<void> killSession(String name) => _runExclusive(
+        () async {
+          final channelManager = _channelManager;
+          if (channelManager == null) return;
+          final escaped = shellQuote(name);
+          await _execCommand(channelManager, 'tmux kill-session -t $escaped');
+        },
+        swallowErrors: true, // セッション不在等は正常扱い
       );
+
+  Future<void> renameSession(String oldName, String newName) => _runExclusive(
+        () async {
+          final channelManager = _channelManager;
+          if (channelManager == null) return;
+          final escapedOld = shellQuote(oldName);
+          final escapedNew = shellQuote(newName);
+          await _execCommand(
+            channelManager,
+            'tmux rename-session -t $escapedOld $escapedNew',
+          );
+        },
+        swallowErrors: true, // セッション不在・名前衝突等は正常扱い
+      );
+
+  /// Runs [operation] exclusively under the [_isOperating] guard.
+  /// Returns early (no-op) if another operation is already in progress.
+  /// If [swallowErrors] is true, exceptions from [operation] are silently
+  /// discarded; otherwise they propagate to the caller.
+  Future<void> _runExclusive(
+    Future<void> Function() operation, {
+    bool swallowErrors = false,
+  }) async {
+    if (_isOperating) return;
+    _isOperating = true;
+    try {
+      await operation();
+    } catch (_) {
+      if (!swallowErrors) rethrow;
     } finally {
       _isOperating = false;
       await _safeRefresh();
@@ -171,7 +181,7 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     final connectionState = ref.read(terminalConnectionProvider(arg));
     final terminal = connectionState.terminal;
     if (terminal == null) return;
-    final escaped = shellEscape(name);
+    final escaped = shellQuote(name);
     // セッションレベルで mouse mode を有効化（グローバル設定には影響しない）
     _enableTmuxMouse(name);
     terminal.textInput('tmux attach -t $escaped\r');
@@ -182,7 +192,7 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
   void _enableTmuxMouse(String sessionName) {
     final channelManager = _channelManager;
     if (channelManager == null) return;
-    final escaped = shellEscape(sessionName);
+    final escaped = shellQuote(sessionName);
     // fire-and-forget: 失敗しても attach 自体に影響しない
     _execCommand(channelManager, 'tmux set-option -t $escaped mouse on')
         .catchError((_) {});
@@ -202,6 +212,14 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     _refreshTimer = null;
   }
 
+  /// テスト専用: state を直接設定する。
+  /// _initializeState のエラーリカバリー（prev != null のデータ維持）を
+  /// テストするために使用する。
+  @visibleForTesting
+  void setStateForTesting(TmuxState value) {
+    state = AsyncData(value);
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
@@ -209,13 +227,18 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
   Future<TmuxAvailability> _checkAvailability(
       SshChannelManager channelManager) async {
     try {
-      final (_, _, exitCode) =
-          await _runCommand(channelManager, 'command -v tmux');
-      if (exitCode != null && exitCode != 0) return const TmuxNotInstalled();
-
-      final (versionOutput, _, _) =
+      // tmux -V はインストールされていなければ失敗するため
+      // command -v tmux との2段階チェックは不要
+      final (versionOutput, _, exitCode) =
           await _runCommand(channelManager, 'tmux -V');
-      return TmuxAvailable(version: versionOutput.trim());
+      if (exitCode != null && exitCode != 0) return const TmuxNotInstalled();
+      final version = versionOutput.trim();
+      // exitCode が null（dartssh2 の制約）かつ出力が tmux バージョン形式でない場合は
+      // tmux 未インストールと判断する
+      if (version.isEmpty || !version.toLowerCase().startsWith('tmux')) {
+        return const TmuxNotInstalled();
+      }
+      return TmuxAvailable(version: version);
     } catch (_) {
       return const TmuxNotInstalled();
     }
@@ -238,7 +261,7 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
           stderr.toLowerCase().contains('no sessions')) {
         return [];
       }
-      debugPrint('tmux list-sessions error (exit $exitCode): $stderr');
+      AppLogger.instance.log('tmux list-sessions error (exit $exitCode): $stderr');
       return [];
     }
 
@@ -247,7 +270,7 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       if (line.isEmpty) continue;
       final parts = line.split(_sep);
       if (parts.length != 4) {
-        debugPrint('tmux parse skip (${parts.length} fields): $line');
+        AppLogger.instance.log('tmux parse skip (${parts.length} fields): $line');
         continue;
       }
       sessions.add(TmuxSession(
@@ -263,23 +286,44 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
   }
 
   /// Runs a command via exec channel and collects stdout, stderr, and exit code.
+  /// Throws [TimeoutException] if the command does not complete within [timeout].
+  /// The SSH exec channel is always closed in a finally block (even on timeout).
   Future<(String output, String error, int? exitCode)> _runCommand(
     SshChannelManager channelManager,
-    String command,
-  ) async {
+    String command, {
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
     final session = await channelManager.executeCommand(command);
-    final stdoutChunks = await session.stdout.toList();
-    final stderrChunks = await session.stderr.toList();
-    await session.done;
-    final output = utf8.decode(
-      stdoutChunks.expand((e) => e).toList(),
-      allowMalformed: true,
-    );
-    final error = utf8.decode(
-      stderrChunks.expand((e) => e).toList(),
-      allowMalformed: true,
-    );
-    return (output, error, session.exitCode);
+    try {
+      // Collect stdout and stderr in parallel to avoid serial timeout accumulation.
+      final results = await Future.wait([
+        session.stdout.toList(),
+        session.stderr.toList(),
+      ]).timeout(timeout);
+      // Use a short close-ACK timeout: once both streams are drained the server
+      // has sent EOF, so the channel close handshake should complete within a
+      // network round-trip.  Reusing the full `timeout` here would double the
+      // worst-case blocking time (e.g. 15 s → 30 s).
+      // Swallow TimeoutException: the output has already been collected, so a
+      // slow close-ACK must not discard the result.  session.close() in the
+      // finally block will clean up the SSH channel regardless.
+      try {
+        await session.done.timeout(const Duration(seconds: 2));
+      } on TimeoutException {
+        // Close-ACK was slow but output is already available — treat as success.
+      }
+      final output = utf8.decode(
+        results[0].expand((e) => e).toList(),
+        allowMalformed: true,
+      );
+      final error = utf8.decode(
+        results[1].expand((e) => e).toList(),
+        allowMalformed: true,
+      );
+      return (output, error, session.exitCode);
+    } finally {
+      try { session.close(); } catch (_) {}
+    }
   }
 
   Future<void> _execCommand(
@@ -302,19 +346,15 @@ final tmuxProvider =
   TmuxNotifier.new,
 );
 
-// ---------------------------------------------------------------------------
-// Shell escape utility for tmux session names
-// ---------------------------------------------------------------------------
-
-/// Wraps [value] in single quotes and escapes embedded single quotes.
-String shellEscape(String value) => shellQuote(value);
-
 /// Validates a tmux session name (no spaces, no dots, non-empty).
 String? validateTmuxSessionName(String name, List<String> existingNames) {
   if (name.isEmpty) return 'Session name cannot be empty';
   if (name.contains(' ')) return 'Session name cannot contain spaces';
   if (name.contains('.')) return 'Session name cannot contain dots';
   if (name.contains(':')) return 'Session name cannot contain colons';
+  if (name.contains(TmuxNotifier._sep)) {
+    return "Session name cannot contain '${TmuxNotifier._sep}'";
+  }
   if (existingNames.contains(name)) return 'Session "$name" already exists';
   return null;
 }

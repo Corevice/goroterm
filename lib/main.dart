@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'app.dart';
 import 'core/background/ssh_foreground_service.dart';
+import 'core/notification/notification_service.dart';
 import 'core/storage/database.dart';
 import 'features/connections/connection_provider.dart';
 
@@ -15,6 +16,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   FlutterForegroundTask.initCommunicationPort();
   SshForegroundService.init();
+  await NotificationService.instance.init();
 
   final dbFolder = await getApplicationDocumentsDirectory();
   final file = File(p.join(dbFolder.path, 'terminal_ssh.db'));

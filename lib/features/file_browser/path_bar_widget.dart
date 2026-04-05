@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'file_browser_provider.dart';
+import '../../core/utils/shell_utils.dart';
 
 /// Breadcrumb-style path bar.
 ///
@@ -124,4 +124,4 @@ class _PathBarWidgetState extends State<PathBarWidget> {
 }
 
 /// Returns the path after shell-escaping for safe terminal paste.
-String shellEscapeForTerminal(String path) => shellEscapePath(path);
+String shellEscapeForTerminal(String path) => shellQuote(path);

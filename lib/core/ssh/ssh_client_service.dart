@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:flutter/foundation.dart';
 
 import 'connection_config.dart';
 import 'keepalive_ssh_socket.dart';
@@ -10,9 +10,25 @@ import 'known_hosts_store.dart';
 import '../error/app_error.dart';
 
 class SshClientService {
-  SshClientService({required this.knownHostsStore});
+  SshClientService({
+    required this.knownHostsStore,
+    Future<SSHSocket> Function(String, int, {Duration? timeout})? socketFactory,
+    @visibleForTesting
+    Future<SSHSession> Function(String command)? executeFactory,
+  })  : _socketFactory = socketFactory ?? _defaultSocketFactory,
+        _executeFactory = executeFactory;
+
+  static Future<SSHSocket> _defaultSocketFactory(
+    String host,
+    int port, {
+    Duration? timeout,
+  }) =>
+      KeepaliveSSHSocket.connect(host, port, timeout: timeout);
 
   final KnownHostsStore knownHostsStore;
+  final Future<SSHSocket> Function(String, int, {Duration? timeout})
+  _socketFactory;
+  final Future<SSHSession> Function(String command)? _executeFactory;
   SSHClient? _client;
 
   SSHClient? get client => _client;
@@ -31,7 +47,7 @@ class SshClientService {
       // TCP keepalive 付きカスタムソケットを使用。
       // OS カーネルがバックグラウンドでも keepalive パケットを送信し、
       // NAT テーブルの有効期限切れを防ぐ。
-      final socket = await KeepaliveSSHSocket.connect(
+      final socket = await _socketFactory(
         config.host,
         config.port,
         timeout: const Duration(seconds: 10),
@@ -47,7 +63,7 @@ class SshClientService {
             ? SSHKeyPair.fromPem(privateKeyPem, passphrase)
             : null,
         onVerifyHostKey: (type, fingerprint) async {
-          return _verifyHostKey(
+          return verifyHostKey(
             config.host,
             config.port,
             fingerprint,
@@ -55,7 +71,7 @@ class SshClientService {
             onHostKeyMismatch: onHostKeyMismatch,
           );
         },
-        keepAliveInterval: const Duration(seconds: 10),
+        keepAliveInterval: const Duration(seconds: 30),
       );
 
       await _client!.authenticated;
@@ -73,7 +89,8 @@ class SshClientService {
     }
   }
 
-  Future<bool> _verifyHostKey(
+  @visibleForTesting
+  Future<bool> verifyHostKey(
     String host,
     int port,
     Uint8List hostKey, {
@@ -82,9 +99,10 @@ class SshClientService {
         onHostKeyMismatch,
   }) async {
     final fingerprint = knownHostsStore.computeFingerprint(hostKey);
-    final result = await knownHostsStore.verify(host, port, hostKey);
+    final (matched, storedFingerprint) =
+        await knownHostsStore.verify(host, port, hostKey);
 
-    if (result == null) {
+    if (matched == null) {
       // First connection - ask user
       final accepted = await onUnknownHostKey?.call(fingerprint) ?? false;
       if (accepted) {
@@ -93,12 +111,10 @@ class SshClientService {
       return accepted;
     }
 
-    if (result == false) {
-      // Mismatch - potential MITM
-      final storedFingerprint =
-          await knownHostsStore.getStoredFingerprint(host, port);
+    if (matched == false) {
+      // Mismatch - potential MITM; storedFingerprint is already available
       final accepted = await onHostKeyMismatch?.call(
-            storedFingerprint!,
+            storedFingerprint ?? '',
             fingerprint,
           ) ??
           false;
@@ -119,17 +135,21 @@ class SshClientService {
     Duration executeTimeout = const Duration(seconds: 5),
     Duration doneTimeout = const Duration(seconds: 5),
   }) async {
-    if (_client == null || _client!.isClosed) return false;
+    final execute = _executeFactory;
+    // _executeFactory は @visibleForTesting 用。通常実行時は _client チェックを行う。
+    if (execute == null && (_client == null || _client!.isClosed)) return false;
+    SSHSession? session;
     try {
-      final session = await _client!
-          .execute('true')
-          .timeout(executeTimeout);
+      final executeCmd = execute ?? (String cmd) => _client!.execute(cmd);
+      session = await executeCmd('true').timeout(executeTimeout);
       await session.done.timeout(doneTimeout);
       return true;
     } on TimeoutException {
       return false;
     } catch (_) {
       return false;
+    } finally {
+      try { session?.close(); } catch (_) {}
     }
   }
 
@@ -142,4 +162,10 @@ class SshClientService {
       _client = null;
     }
   }
+
+  /// テスト専用: _client を直接注入する。
+  /// isConnected の `_client != null && _client!.isClosed` パスや
+  /// keepAlive の isClosed ガードを実際の SSH 接続なしにテストするために使用する。
+  @visibleForTesting
+  void setClientForTesting(SSHClient? client) => _client = client;
 }

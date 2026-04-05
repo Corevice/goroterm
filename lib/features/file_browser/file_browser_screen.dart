@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
 import '../../core/error/app_error.dart';
+import '../../core/utils/shell_utils.dart';
 import '../terminal/terminal_connection_provider.dart';
 import 'file_browser_provider.dart';
 import 'file_item_widget.dart';
@@ -153,6 +154,7 @@ class _BrowserBody extends ConsumerWidget {
 
     final downloading = state.downloadProgress != null;
     final downloaded = state.downloadedFilePath != null;
+    final hasDownloadError = state.downloadError != null;
     final uploading = state.uploadProgress != null;
     final uploaded = state.uploadCompleteFile != null;
 
@@ -176,6 +178,21 @@ class _BrowserBody extends ConsumerWidget {
             actions: [
               TextButton(
                 onPressed: notifier.clearDownloadNotification,
+                child: const Text('OK', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        if (hasDownloadError)
+          MaterialBanner(
+            backgroundColor: Colors.red[900],
+            content: Text(
+              'ダウンロードエラー: ${state.downloadError!}',
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+            actions: [
+              TextButton(
+                onPressed: notifier.clearDownloadError,
                 child: const Text('OK', style: TextStyle(color: Colors.white)),
               ),
             ],
@@ -245,7 +262,7 @@ class _BrowserBody extends ConsumerWidget {
                         }
                       },
                       onPasteToTerminal: (path) {
-                        final escaped = shellEscapePath(path);
+                        final escaped = shellQuote(path);
                         terminal?.textInput(escaped);
                       },
                       onPreview: (path) {

@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 
+import '../../core/utils/shell_utils.dart' as shell_utils;
+
 class TerminalInputService {
   TerminalInputService({required this.session});
 
@@ -50,10 +52,8 @@ class TerminalInputService {
     writeToSsh('\x1B[D');
   }
 
-  String sanitizeForTerminal(String text) {
-    // Replace Windows-style line endings with Unix-style
-    return text.replaceAll('\r\n', '\r').replaceAll('\n', '\r');
-  }
+  String sanitizeForTerminal(String text) =>
+      shell_utils.sanitizeForTerminal(text);
 
   void paste(String text) {
     writeToSsh(sanitizeForTerminal(text));

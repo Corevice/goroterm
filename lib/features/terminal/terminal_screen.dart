@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:xterm/xterm.dart';
 
 import '../../core/ssh/connection_config.dart';
@@ -27,6 +28,7 @@ import '../../widgets/quick_action_bar.dart';
 import '../../core/utils/app_logger.dart';
 import '../../core/utils/shell_utils.dart';
 import '../../widgets/terminal_scroll_interceptor.dart';
+import '../../core/notification/notification_service.dart';
 import '../claude_usage/claude_usage_dialog.dart';
 import '../server_monitor/server_monitor_dialog.dart';
 import '../../widgets/terminal_selection_toolbar.dart';
@@ -67,10 +69,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     if (data == 'keepalive' && mounted) {
       AppLogger.instance.log('[SSH] keepalive tick from service');
       final managerState = ref.read(sessionManagerProvider);
-      // 毎回（10秒間隔）activeKeepAlive を実行。
-      // SSH exec チャネルでネットワークパケットを送信し、
-      // NAT テーブルを維持し続ける。
-      // execute('true') は軽量（open→close）なので 10 秒間隔なら過負荷にならない。
+      // 毎回（30秒間隔）activeKeepAlive を実行。
+      // SSH exec チャネルでネットワークパケットを送信し、接続ヘルスチェックを行う。
+      // NAT 維持は dartssh2 の SSH keepalive (10s) + TCP keepalive (15s) が担当。
       for (final session in managerState.sessions) {
         ref
             .read(terminalConnectionProvider(session.sessionId).notifier)
@@ -124,6 +125,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
+      TerminalConnectionNotifier.setAppInBackground(true);
+      // フォアグラウンドで蓄積されたバイトカウントをリセット
+      final sessions = ref.read(sessionManagerProvider).sessions;
+      for (final session in sessions) {
+        ref
+            .read(terminalConnectionProvider(session.sessionId).notifier)
+            .resetIdleCounter();
+      }
       // バックグラウンド移行時に Drawer を閉じて黒画面を防止
       // inactive ではなく paused のみ（inactive はアプリスイッチャー等でも発火する）
       if (!mounted) return;
@@ -135,13 +144,22 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       }
     }
     if (state == AppLifecycleState.resumed) {
+      TerminalConnectionNotifier.setAppInBackground(false);
+      // 全セッションの通知をキャンセル＋フラグリセット
+      final managerState = ref.read(sessionManagerProvider);
+      for (final session in managerState.sessions) {
+        NotificationService.instance.cancelForSession(session.sessionId);
+        ref
+            .read(terminalConnectionProvider(session.sessionId).notifier)
+            .clearNotificationFlag();
+      }
       // フォアグラウンドサービスのおかげで通常は接続維持されているが、
       // 万一の切断に備えて短い遅延後にチェック
       Future.delayed(const Duration(milliseconds: 1500), () {
         if (!mounted) return;
-        final managerState = ref.read(sessionManagerProvider);
+        final sessions = ref.read(sessionManagerProvider).sessions;
         // 全セッションの接続を確認（バックグラウンドで全部死んでいる可能性がある）
-        for (final session in managerState.sessions) {
+        for (final session in sessions) {
           ref
               .read(terminalConnectionProvider(session.sessionId).notifier)
               .checkConnection();
@@ -205,18 +223,21 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     final managerState = ref.watch(sessionManagerProvider);
     final sessions = managerState.sessions;
 
-    ref.listen<SessionManagerState>(sessionManagerProvider, (prev, next) {
-      if (next.batteryWarning && !(prev?.batteryWarning ?? false)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'バッテリー最適化が有効です。バックグラウンドでSSH接続が切れる可能性があります。',
+    ref.listen<bool>(
+      sessionManagerProvider.select((s) => s.batteryWarning),
+      (prev, next) {
+        if (next && !(prev ?? false)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'バッテリー最適化が有効です。バックグラウンドでSSH接続が切れる可能性があります。',
+              ),
+              duration: Duration(seconds: 5),
             ),
-            duration: Duration(seconds: 5),
-          ),
-        );
-      }
-    });
+          );
+        }
+      },
+    );
 
     if (sessions.isEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -469,7 +490,6 @@ class _TabStripState extends State<_TabStrip> {
       ctx,
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
-      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
     );
   }
 
@@ -562,14 +582,23 @@ class _TerminalTabContent extends ConsumerStatefulWidget {
 }
 
 class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   final _terminalController = TerminalController();
   final _focusNode = FocusNode();
   final _scrollController = ScrollController();
+  /// タブごとにキーボード表示状態を記憶する。
+  /// true ならタブ切り替え時にフォーカスを復元（キーボード表示）する。
+  /// viewInsets.bottom で実際のキーボード表示を追跡する。
+  bool _wantKeyboard = true;
   OverlayEntry? _toolbarOverlay;
   Timer? _toolbarAutoHideTimer;
   ProviderSubscription<SshChannelManager?>? _channelManagerSubscription;
   bool _isSelectMode = false;
+
+  // Voice input
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _isListening = false;
+  bool _speechAvailable = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -580,6 +609,8 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     // ref.listenManual は initState 内で一度だけ登録（rebuild で再登録されない）
     _terminalController.addListener(_onSelectionChanged);
     widget.drawerClosedNotifier?.addListener(_onDrawerClosed);
+    WidgetsBinding.instance.addObserver(this);
+    _initSpeech();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _channelManagerSubscription = ref.listenManual(
@@ -596,6 +627,17 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         fireImmediately: true,
       );
       _startConnection();
+      // シェル終了を検知してタブを自動クローズ
+      ref.listenManual(
+        terminalConnectionProvider(widget.sessionId)
+            .select((s) => s.shellExited),
+        (prev, next) {
+          if (next && !(prev ?? false)) {
+            ref.read(sessionManagerProvider.notifier)
+                .removeSession(widget.sessionId);
+          }
+        },
+      );
     });
   }
 
@@ -603,12 +645,19 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
   void didUpdateWidget(covariant _TerminalTabContent oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.isActive && !oldWidget.isActive) {
-      // タブがアクティブになったらフォーカスを要求
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && widget.isActive) {
-          _focusNode.requestFocus();
-        }
-      });
+      // タブがアクティブになったら通知をキャンセル＋フラグリセット
+      NotificationService.instance.cancelForSession(widget.sessionId);
+      ref
+          .read(terminalConnectionProvider(widget.sessionId).notifier)
+          .clearNotificationFlag();
+      // 前回の状態に基づいてフォーカスを復元
+      if (_wantKeyboard) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && widget.isActive) {
+            _focusNode.requestFocus();
+          }
+        });
+      }
     } else if (!widget.isActive && oldWidget.isActive) {
       // タブが非アクティブになったらフォーカスを外す
       // これにより新しいアクティブタブの requestFocus() が確実に成功する
@@ -618,8 +667,10 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
 
   @override
   void dispose() {
+    _speech.stop();
     _terminalController.removeListener(_onSelectionChanged);
     widget.drawerClosedNotifier?.removeListener(_onDrawerClosed);
+    WidgetsBinding.instance.removeObserver(this);
     _toolbarAutoHideTimer?.cancel();
     _longPressSelectTimer?.cancel();
     _hideToolbar();
@@ -630,10 +681,22 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     super.dispose();
   }
 
+  /// 実際のキーボード表示/非表示を viewInsets で追跡する。
+  /// Android の戻るボタンやキーボード閉じるボタンでも正しく検知できる。
+  @override
+  void didChangeMetrics() {
+    if (!widget.isActive || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !widget.isActive) return;
+      final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+      _wantKeyboard = bottomInset > 0;
+    });
+  }
+
   void _onDrawerClosed() {
-    // ドロワーが閉じた後、アクティブタブならフォーカスを要求。
+    // ドロワーが閉じた後、アクティブタブならフォーカスを復元。
     // ドロワーのアニメーション完了後（300ms）にフォーカスを取る。
-    if (!widget.isActive) return;
+    if (!widget.isActive || !_wantKeyboard) return;
     Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted && widget.isActive) {
         _focusNode.requestFocus();
@@ -655,6 +718,57 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     }
   }
 
+  /// URL 検出用の正規表現
+  static final _urlRegExp = RegExp(
+    r'https?://[^\s\x00-\x1F\x7F<>"{}|\\^`\[\]）】」』）]+',
+  );
+
+  /// 選択範囲を含む行からURLを検出する。
+  /// 選択の開始位置を含むURLを優先的に返す。
+  String? _detectUrlAroundSelection(Terminal terminal) {
+    final selection = _terminalController.selection;
+    if (selection == null) return null;
+
+    final buffer = terminal.buffer;
+    final startY = selection.begin.y;
+
+    // 選択開始行のテキストを取得（wrapped 行を結合）
+    final lineText = _getFullLineText(buffer, startY);
+    if (lineText == null) return null;
+
+    // 行内のすべての URL を検出し、選択開始列を含むものを返す
+    final startX = selection.begin.x;
+    for (final match in _urlRegExp.allMatches(lineText)) {
+      if (startX >= match.start && startX <= match.end) {
+        return _cleanUrl(match.group(0)!);
+      }
+    }
+
+    // 選択位置と完全に重ならなくても、行内にURLがあればそれを返す
+    final firstMatch = _urlRegExp.firstMatch(lineText);
+    if (firstMatch != null) {
+      return _cleanUrl(firstMatch.group(0)!);
+    }
+
+    return null;
+  }
+
+  /// バッファから指定行のテキストを取得する。wrapped 行を結合する。
+  String? _getFullLineText(dynamic buffer, int absoluteY) {
+    final lines = buffer.lines;
+    if (absoluteY < 0 || absoluteY >= lines.length) return null;
+    return lines[absoluteY].getText();
+  }
+
+  /// URL 末尾の不要な句読点・括弧を除去する。
+  String _cleanUrl(String url) {
+    // 末尾の句読点や閉じ括弧を除去（URL の一部でないことが多い）
+    while (url.isNotEmpty && '.,:;!?)>」』）】'.contains(url[url.length - 1])) {
+      url = url.substring(0, url.length - 1);
+    }
+    return url;
+  }
+
   void _showToolbar() {
     _hideToolbar();
     _toolbarAutoHideTimer?.cancel();
@@ -664,6 +778,9 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         ref.read(terminalConnectionProvider(widget.sessionId));
     final terminal = connectionState.terminal;
     if (terminal == null) return;
+
+    final detectedUrl = _detectUrlAroundSelection(terminal);
+
     _toolbarOverlay = OverlayEntry(
       builder: (ctx) => Positioned(
         top: MediaQuery.of(ctx).padding.top + kToolbarHeight + 8,
@@ -673,6 +790,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
           child: TerminalSelectionToolbar(
             terminal: terminal,
             controller: _terminalController,
+            detectedUrl: detectedUrl,
             onPaste: (text) {
               ref
                   .read(terminalConnectionProvider(widget.sessionId))
@@ -762,6 +880,53 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       _isSelectMode = false;
       _terminalController.setPointerInputs(_defaultPointerInputs);
     });
+  }
+
+  Future<void> _initSpeech() async {
+    _speechAvailable = await _speech.initialize(
+      onError: (error) {
+        if (mounted) {
+          setState(() => _isListening = false);
+        }
+      },
+      onStatus: (status) {
+        if (status == 'done' || status == 'notListening') {
+          if (mounted) {
+            setState(() => _isListening = false);
+          }
+        }
+      },
+    );
+  }
+
+  void _toggleVoiceInput() {
+    if (_isListening) {
+      _speech.stop();
+      setState(() => _isListening = false);
+      return;
+    }
+
+    if (!_speechAvailable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Speech recognition not available')),
+      );
+      return;
+    }
+
+    setState(() => _isListening = true);
+    _speech.listen(
+      onResult: (result) {
+        if (result.finalResult && result.recognizedWords.isNotEmpty) {
+          final connectionState =
+              ref.read(terminalConnectionProvider(widget.sessionId));
+          connectionState.terminal?.paste(result.recognizedWords);
+        }
+      },
+      listenOptions: stt.SpeechListenOptions(
+        listenMode: stt.ListenMode.dictation,
+      ),
+      localeId: 'ja_JP',
+    );
   }
 
   Future<void> _startConnection() async {
@@ -949,8 +1114,9 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       );
     }
 
+    SftpClient? sftp;
     try {
-      final sftp = await channelManager.openSftpChannel();
+      sftp = await channelManager.openIndependentSftpChannel();
 
       // ディレクトリがなければ作成
       try {
@@ -982,10 +1148,10 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         // 動画 → GIF 変換（サーバー側 ffmpeg）
         final gifPath = '$_uploadDir/${ts}_${fileName.split('.').first}.gif';
         final ffmpegCmd =
-            "ffmpeg -i '${remotePath.replaceAll("'", "'\\''")}'"
+            "ffmpeg -i ${shellQuote(remotePath)}"
             " -vf 'fps=10,scale=480:-1:flags=lanczos'"
             " -t 15 -y"
-            " '${gifPath.replaceAll("'", "'\\''")}'";
+            " ${shellQuote(gifPath)}";
 
         if (mounted) {
           ScaffoldMessenger.of(context)
@@ -1003,9 +1169,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
           // 変換成功 → GIF パスを使用、元動画を削除
           pastePath = gifPath;
           try {
-            await channelManager
-                .runCommand("rm -f '${remotePath.replaceAll("'", "'\\''")}'"
-            );
+            await channelManager.runCommand("rm -f ${shellQuote(remotePath)}");
           } catch (_) {}
         } catch (e) {
           // ffmpeg 失敗（未インストール等）→ 元動画パスをそのまま使用
@@ -1031,8 +1195,8 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
             SnackBar(content: Text('Ready: $pastePath')),
           );
 
-        // パスをターミナルに自動ペースト
-        connectionState.terminal?.paste(pastePath);
+        // パスをターミナルに自動ペースト（再接続で terminal が変わっている可能性があるため最新を取得）
+        ref.read(terminalConnectionProvider(widget.sessionId)).terminal?.paste(pastePath);
       }
     } catch (e) {
       if (mounted) {
@@ -1042,6 +1206,8 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
             SnackBar(content: Text('Upload failed: $e')),
           );
       }
+    } finally {
+      try { sftp?.close(); } catch (_) {}
     }
   }
 
@@ -1174,7 +1340,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       connectionState.terminal!,
       controller: _terminalController,
       focusNode: _focusNode,
-      autofocus: true,
+      autofocus: false,
       autoResize: true,
       // macOS: deleteDetection=false にして _initEditingState を空文字列にする。
       // "  " パディングが Google IME で IME 確定時にテキスト二重化を引き起こすため。
@@ -1261,6 +1427,8 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
           onClaudeCommand: connectionState.terminal != null
               ? () => connectionState.terminal?.textInput('claude\r')
               : null,
+          onVoiceInput: connectionState.terminal != null ? _toggleVoiceInput : null,
+          isListening: _isListening,
           onImagePaste: connectionState.terminal != null ? _pasteMedia : null,
           onClipboardPaste: connectionState.terminal != null
               ? _pasteClipboardImageOrText

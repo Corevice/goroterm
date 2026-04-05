@@ -71,6 +71,11 @@ void main() {
     test('Japanese text appending', () {
       expect(CompositionBuffer.extractDelta('東京', '東京都'), '都');
     });
+
+    test('current shorter than previous returns full current text', () {
+      // e.g. user deleted chars; no common-prefix logic needed, return current
+      expect(CompositionBuffer.extractDelta('abcdef', 'abc'), 'abc');
+    });
   });
 
   group('isCancelled', () {

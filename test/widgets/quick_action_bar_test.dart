@@ -176,6 +176,7 @@ void main() {
           ),
         ),
       ));
+      await tester.ensureVisible(find.text('PgUp'));
       await tester.tap(find.text('PgUp'));
       await tester.pump();
       expect(called, isTrue);
@@ -192,6 +193,7 @@ void main() {
           ),
         ),
       ));
+      await tester.ensureVisible(find.text('PgDn'));
       await tester.tap(find.text('PgDn'));
       await tester.pump();
       expect(called, isTrue);
@@ -293,6 +295,58 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    // -------------------------------------------------------------------------
+    // medium-tap path: pointer-up after activation (80ms) but before the
+    // repeat-start timer fires (80ms + 200ms = 280ms).
+    //
+    // _startRepeat() fires at 80ms → _isPressed = true, 1 event sent, a 200ms
+    // one-shot timer is started that would kick off the periodic repeat.
+    // Before that 200ms elapses the finger is lifted, so _stopRepeat() is
+    // called.  At that point:
+    //   wasPendingActivation = false  (activation timer already fired)
+    //   _isPressed            = true  (set by _startRepeat)
+    // → the "short tap" branch (wasPendingActivation && !_isPressed) is false
+    //   → no duplicate event is added
+    //   → the 200ms timer is cancelled → no repeat events ever fire
+    //
+    // Expected: exactly 1 event total.
+    // -------------------------------------------------------------------------
+    testWidgets(
+        'medium tap (between activation and repeat start) sends exactly one event',
+        (tester) async {
+      final calls = <TerminalKey>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+            onTextInput: (_) {},
+          ),
+        ),
+      ));
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.arrow_upward)),
+      );
+      // Past activation delay (80ms) → _startRepeat fires, 1 event sent.
+      await tester.pump(const Duration(milliseconds: 90));
+      expect(calls.length, 1, reason: 'activation should have fired once');
+
+      // Lift finger before the 200ms repeat-start timer elapses.
+      await gesture.up();
+      await tester.pump();
+
+      // No extra event from the short-tap branch.
+      expect(calls.length, 1,
+          reason: '_isPressed=true suppresses duplicate tap event');
+
+      // Advance well past repeat-start delay to confirm the timer was cancelled.
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(calls.length, 1,
+          reason: 'repeat timer must have been cancelled on pointer-up');
+    });
+
     testWidgets('horizontal swipe cancels and sends no events', (tester) async {
       final calls = <TerminalKey>[];
       await tester.pumpWidget(MaterialApp(
@@ -317,6 +371,203 @@ void main() {
       await tester.pump();
 
       expect(calls, isEmpty);
+    });
+
+    // -------------------------------------------------------------------------
+    // onPointerCancel path (system-level gesture cancellation)
+    //
+    // When the OS cancels the pointer (e.g., another gesture recognizer wins,
+    // or a phone call interrupts), the Listener fires onPointerCancel which
+    // calls _cancel(). This must stop any pending/running timers and send no
+    // additional key events.
+    // -------------------------------------------------------------------------
+
+    testWidgets('pointer cancel before activation fires sends no events',
+        (tester) async {
+      final calls = <TerminalKey>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+            onTextInput: (_) {},
+          ),
+        ),
+      ));
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.arrow_upward)),
+      );
+      // Cancel before the 80ms activation delay elapses.
+      await tester.pump(const Duration(milliseconds: 30));
+      await gesture.cancel();
+      await tester.pumpAndSettle();
+
+      expect(calls, isEmpty,
+          reason: 'cancel before activation must not send any key event');
+    });
+
+    testWidgets('pointer cancel during long press stops the repeat',
+        (tester) async {
+      final calls = <TerminalKey>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+            onTextInput: (_) {},
+          ),
+        ),
+      ));
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.arrow_upward)),
+      );
+      // Pass activation delay (80ms) — first key is sent.
+      await tester.pump(const Duration(milliseconds: 90));
+      // Pass repeat start delay (200ms) and two 50ms ticks — repeat is running.
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      final countAtCancel = calls.length;
+      expect(countAtCancel, greaterThan(1),
+          reason: 'should have at least the activation press + repeat events');
+
+      // System cancels the gesture.
+      await gesture.cancel();
+      // Let more time pass — the repeat timer must have been cancelled.
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(calls.length, equals(countAtCancel),
+          reason: 'no further key events should fire after pointer cancel');
+    });
+
+    // -------------------------------------------------------------------------
+    // deactivate() path: GlobalKey reparenting
+    //
+    // When QuickActionBar is moved to a different parent in the widget tree
+    // (GlobalKey reparenting), Flutter calls deactivate() on all descendant
+    // states — including _RepeatableActionButtonState — without calling
+    // dispose(). The deactivate() override must cancel any running timers so
+    // no stale events fire after the widget is re-activated at its new position.
+    // -------------------------------------------------------------------------
+    testWidgets(
+        'deactivate during repeat stops the timer and prevents further events',
+        (tester) async {
+      final calls = <TerminalKey>[];
+      final barKey = GlobalKey();
+
+      // Helper: build the bar optionally wrapped in an extra Container.
+      // Switching between the two builds reparents the bar (GlobalKey move).
+      Widget buildWrapper({required bool inContainer}) {
+        final bar = QuickActionBar(
+          key: barKey,
+          onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+          onTextInput: (_) {},
+        );
+        return MaterialApp(
+          home: Scaffold(
+            body: inContainer ? Container(child: bar) : bar,
+          ),
+        );
+      }
+
+      await tester.pumpWidget(buildWrapper(inContainer: true));
+
+      // Start a long press: wait past activation delay (80ms) and repeat-start
+      // delay (200ms), then let a couple of 50ms repeat ticks fire.
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.arrow_upward)),
+      );
+      await tester.pump(const Duration(milliseconds: 90)); // activation fires
+      await tester.pump(const Duration(milliseconds: 200)); // repeat-start delay
+      await tester.pump(const Duration(milliseconds: 50)); // first repeat tick
+
+      final countBeforeDeactivate = calls.length;
+      expect(countBeforeDeactivate, greaterThan(1),
+          reason: 'should have activation press + at least one repeat event');
+
+      // Reparent: move bar from inside Container to direct Scaffold body.
+      // Flutter recognises the GlobalKey, calls deactivate() on the subtree
+      // (including _RepeatableActionButtonState), moves it, then calls activate().
+      // dispose() is NOT called — the state is preserved for the new position.
+      await tester.pumpWidget(buildWrapper(inContainer: false));
+      await tester.pump();
+
+      // Advance time well beyond repeat intervals.  The repeat timer must have
+      // been cancelled by deactivate(), so no new events should fire.
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(calls.length, equals(countBeforeDeactivate),
+          reason: 'deactivate() must cancel the repeat timer');
+
+      await gesture.cancel();
+      await tester.pumpAndSettle();
+    });
+  });
+
+  group('QuickActionBar voice input button', () {
+    testWidgets('voice button hidden when onVoiceInput is null', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.mic), findsNothing);
+      expect(find.byIcon(Icons.mic_none), findsNothing);
+    });
+
+    testWidgets('voice button shown and tappable when onVoiceInput provided',
+        (tester) async {
+      var called = false;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onVoiceInput: () => called = true,
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.mic_none), findsOneWidget);
+      await tester.ensureVisible(find.byIcon(Icons.mic_none));
+      await tester.tap(find.byIcon(Icons.mic_none));
+      await tester.pump();
+      expect(called, isTrue);
+    });
+
+    testWidgets('shows Icons.mic when isListening is true', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onVoiceInput: () {},
+            isListening: true,
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.mic), findsOneWidget);
+      expect(find.byIcon(Icons.mic_none), findsNothing);
+    });
+
+    testWidgets('shows Icons.mic_none when isListening is false', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: QuickActionBar(
+            onKeyPressed: (key, {ctrl = false}) {},
+            onTextInput: (_) {},
+            onVoiceInput: () {},
+            isListening: false,
+          ),
+        ),
+      ));
+      expect(find.byIcon(Icons.mic_none), findsOneWidget);
+      expect(find.byIcon(Icons.mic), findsNothing);
     });
   });
 

@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/gestures.dart';
@@ -51,6 +51,14 @@ class _TerminalScrollInterceptorState
   // マウスホイール用アキュムレータ
   double _wheelAccumulator = 0.0;
 
+  // 長押し判定との競合防止:
+  // ポインタダウンから一定時間（_kLongPressDelay）以内に十分な移動がなければ
+  // 長押しと判断してスクロールを無効化する。
+  // Timer を使用することで tester.pump() によるテストが可能になる。
+  static const _kLongPressDelay = Duration(milliseconds: 300);
+  Timer? _longPressTimer;
+  bool _longPressActivated = false;
+
   // 1行あたりのピクセル数（フォントサイズに依存）
   double get _lineHeight {
     final viewHeight = widget.terminal.viewHeight;
@@ -58,6 +66,12 @@ class _TerminalScrollInterceptorState
     final renderBox = context.findRenderObject() as RenderBox?;
     if (renderBox == null || !renderBox.hasSize) return 20.0;
     return renderBox.size.height / viewHeight;
+  }
+
+  @override
+  void dispose() {
+    _longPressTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -81,7 +95,12 @@ class _TerminalScrollInterceptorState
   /// alt buffer 中のスクロールを正しい wheel event に変換する。
   bool _onScrollNotification(ScrollNotification notification) {
     if (widget.disabled) return false;
-    if (!widget.terminal.isUsingAltBuffer) return false;
+    if (!widget.terminal.isUsingAltBuffer) {
+      // alt buffer 外では積算値をクリアしておき、次回 alt buffer 入場時を
+      // クリーンな状態から開始する（残留デルタによる誤スクロール防止）。
+      _wheelAccumulator = 0.0;
+      return false;
+    }
 
     if (notification is ScrollUpdateNotification) {
       final dy = notification.scrollDelta ?? 0.0;
@@ -90,16 +109,17 @@ class _TerminalScrollInterceptorState
       final lineHeight = _lineHeight;
       _wheelAccumulator += dy;
 
+      // InfiniteScrollView はセル座標を提供しないので中央を使用。
+      // renderBox の取得とセル座標計算はループ中に変化しないため外に出す。
+      final renderBox = context.findRenderObject() as RenderBox?;
+      final w = renderBox?.size.width ?? 400;
+      final h = renderBox?.size.height ?? 300;
+      final cellX = max(1, (w / 2 / (lineHeight * 0.6)).floor() + 1);
+      final cellY = max(1, (h / 2 / lineHeight).floor() + 1);
+
       while (_wheelAccumulator.abs() >= lineHeight) {
         final isUp = _wheelAccumulator < 0;
         _wheelAccumulator += isUp ? lineHeight : -lineHeight;
-
-        // InfiniteScrollView はセル座標を提供しないので中央を使用
-        final renderBox = context.findRenderObject() as RenderBox?;
-        final w = renderBox?.size.width ?? 400;
-        final h = renderBox?.size.height ?? 300;
-        final cellX = max(1, (w / 2 / (lineHeight * 0.6)).floor() + 1);
-        final cellY = max(1, (h / 2 / lineHeight).floor() + 1);
 
         final handled = _sendWheelEvent(isUp, cellX, cellY);
         if (!handled) {
@@ -172,6 +192,11 @@ class _TerminalScrollInterceptorState
     _dragStartPosition = event.localPosition;
     _isVerticalDrag = false;
     _directionDecided = false;
+    _longPressActivated = false;
+    _longPressTimer?.cancel();
+    _longPressTimer = Timer(_kLongPressDelay, () {
+      _longPressActivated = true;
+    });
   }
 
   void _onPointerMove(PointerMoveEvent event) {
@@ -181,10 +206,18 @@ class _TerminalScrollInterceptorState
       return;
     }
 
-    // 方向判定: 最初の十分な移動で縦 vs 横を決定
+    // 方向 / 長押し判定（_directionDecided が true になるまで毎 move で評価）
     if (!_directionDecided) {
       final dx = (event.localPosition.dx - _dragStartPosition.dx).abs();
       final dy = (event.localPosition.dy - _dragStartPosition.dy).abs();
+
+      // 十分な移動がないまま長押し時間が経過 → テキスト選択モードと判断して無効化
+      if (_longPressActivated && dx + dy < 20) {
+        _reset();
+        return;
+      }
+
+      // 縦 vs 横の判定: 十分な移動量に達したら方向を確定
       if (dx < 10 && dy < 10) return;
       _directionDecided = true;
       _isVerticalDrag = dy > dx;
@@ -268,5 +301,9 @@ class _TerminalScrollInterceptorState
     _accumulatedDelta = 0.0;
     _isVerticalDrag = false;
     _directionDecided = false;
+    _wheelAccumulator = 0.0;
+    _longPressTimer?.cancel();
+    _longPressTimer = null;
+    _longPressActivated = false;
   }
 }

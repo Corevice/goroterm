@@ -17,6 +17,8 @@ class QuickActionBar extends StatelessWidget {
     this.isSelectMode = false,
     this.onToggleSelectMode,
     this.onClaudeCommand,
+    this.onVoiceInput,
+    this.isListening = false,
   });
 
   final void Function(TerminalKey key, {bool ctrl}) onKeyPressed;
@@ -30,6 +32,8 @@ class QuickActionBar extends StatelessWidget {
   final bool isSelectMode;
   final VoidCallback? onToggleSelectMode;
   final VoidCallback? onClaudeCommand;
+  final VoidCallback? onVoiceInput;
+  final bool isListening;
 
   @override
   Widget build(BuildContext context) {
@@ -42,31 +46,14 @@ class QuickActionBar extends StatelessWidget {
           scrollDirection: Axis.horizontal,
           child: Row(
             children: [
-              _ActionButton(
-                label: 'C-c',
-                onPressed: () => onKeyPressed(TerminalKey.keyC, ctrl: true),
-              ),
-              _ActionButton(
-                label: 'C-d',
-                onPressed: () => onKeyPressed(TerminalKey.keyD, ctrl: true),
-              ),
-              _ActionButton(
-                label: 'C-j',
-                onPressed: () => onKeyPressed(TerminalKey.keyJ, ctrl: true),
-              ),
               if (onClaudeCommand != null)
                 _ActionButton(
                   icon: Icons.auto_awesome,
                   onPressed: onClaudeCommand!,
                 ),
-              const SizedBox(width: 8),
               _ActionButton(
-                label: 'Ctrl',
-                onPressed: () => _showCtrlMenu(context),
-              ),
-              _ActionButton(
-                label: 'Tab',
-                onPressed: () => onKeyPressed(TerminalKey.tab),
+                label: 'C-j',
+                onPressed: () => onKeyPressed(TerminalKey.keyJ, ctrl: true),
               ),
               _ActionButton(
                 label: 'Esc',
@@ -88,6 +75,47 @@ class QuickActionBar extends StatelessWidget {
               _RepeatableActionButton(
                 icon: Icons.arrow_downward,
                 onPressed: () => onKeyPressed(TerminalKey.arrowDown),
+              ),
+              const SizedBox(width: 8),
+              if (onImagePaste != null) ...[
+                _ActionButton(
+                  icon: Icons.attach_file,
+                  onPressed: onImagePaste!,
+                ),
+              ],
+              if (onClipboardPaste != null) ...[
+                _ActionButton(
+                  icon: Icons.content_paste,
+                  onPressed: onClipboardPaste!,
+                ),
+              ],
+              if (onVoiceInput != null) ...[
+                _ActionButton(
+                  icon: isListening ? Icons.mic : Icons.mic_none,
+                  onPressed: onVoiceInput!,
+                ),
+              ],
+              if (onImagePaste != null || onClipboardPaste != null || onVoiceInput != null)
+                const SizedBox(width: 8),
+              _ActionButton(
+                label: 'C-c',
+                onPressed: () => onKeyPressed(TerminalKey.keyC, ctrl: true),
+              ),
+              _ActionButton(
+                label: 'C-d',
+                onPressed: () => onKeyPressed(TerminalKey.keyD, ctrl: true),
+              ),
+              _ActionButton(
+                label: 'Tab',
+                onPressed: () => onKeyPressed(TerminalKey.tab),
+              ),
+              _ActionButton(
+                icon: Icons.keyboard_return,
+                onPressed: () => onKeyPressed(TerminalKey.enter),
+              ),
+              _ActionButton(
+                label: 'Ctrl',
+                onPressed: () => _showCtrlMenu(context),
               ),
               const SizedBox(width: 8),
               _ActionButton(
@@ -113,20 +141,6 @@ class QuickActionBar extends StatelessWidget {
                   onPressed: onToggleSelectMode!,
                 ),
               if (onToggleSelectMode != null) const SizedBox(width: 8),
-              if (onImagePaste != null) ...[
-                _ActionButton(
-                  icon: Icons.attach_file,
-                  onPressed: onImagePaste!,
-                ),
-              ],
-              if (onClipboardPaste != null) ...[
-                _ActionButton(
-                  icon: Icons.content_paste,
-                  onPressed: onClipboardPaste!,
-                ),
-              ],
-              if (onImagePaste != null || onClipboardPaste != null)
-                const SizedBox(width: 8),
               _ActionButton(
                 label: '/',
                 onPressed: () => onTextInput('/'),
@@ -151,7 +165,9 @@ class QuickActionBar extends StatelessWidget {
       context: context,
       backgroundColor: Colors.grey[900],
       builder: (context) {
-        final keys = ['C', 'D', 'J', 'Z', 'A', 'E', 'L', 'R', 'K', 'U', 'W'];
+        // Derive keys from the map to avoid two lists drifting out of sync.
+        // The map's insertion order defines the display order.
+        final keys = _ctrlKeyMap.keys.toList();
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -181,22 +197,58 @@ class QuickActionBar extends StatelessWidget {
     );
   }
 
+  // Insertion order defines the display order in the Ctrl menu.
   static const Map<String, TerminalKey> _ctrlKeyMap = {
-    'A': TerminalKey.keyA,
     'C': TerminalKey.keyC,
     'D': TerminalKey.keyD,
-    'E': TerminalKey.keyE,
     'J': TerminalKey.keyJ,
-    'K': TerminalKey.keyK,
+    'Z': TerminalKey.keyZ,
+    'A': TerminalKey.keyA,
+    'E': TerminalKey.keyE,
     'L': TerminalKey.keyL,
     'R': TerminalKey.keyR,
+    'K': TerminalKey.keyK,
     'U': TerminalKey.keyU,
     'W': TerminalKey.keyW,
-    'Z': TerminalKey.keyZ,
   };
 
   TerminalKey _terminalKeyFromChar(String char) =>
       _ctrlKeyMap[char] ?? TerminalKey.keyA;
+}
+
+/// Shared base for tap-style bar buttons:
+/// Padding > Material (rounded) > InkWell > constrained Container.
+class _BarButton extends StatelessWidget {
+  const _BarButton({
+    required this.child,
+    required this.onPressed,
+    this.color,
+  });
+
+  final Widget child;
+  final VoidCallback onPressed;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Material(
+        color: color ?? Colors.grey[800],
+        borderRadius: BorderRadius.circular(4),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: onPressed,
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 36),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _SelectModeButton extends StatelessWidget {
@@ -210,25 +262,13 @@ class _SelectModeButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Material(
-        color: isActive ? Colors.blue[700] : Colors.grey[800],
-        borderRadius: BorderRadius.circular(4),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(4),
-          onTap: onPressed,
-          child: Container(
-            constraints: const BoxConstraints(minWidth: 40, minHeight: 36),
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Icon(
-              Icons.text_fields,
-              size: 18,
-              color: isActive ? Colors.white : Colors.white70,
-            ),
-          ),
-        ),
+    return _BarButton(
+      onPressed: onPressed,
+      color: isActive ? Colors.blue[700] : Colors.grey[800],
+      child: Icon(
+        Icons.text_fields,
+        size: 18,
+        color: isActive ? Colors.white : Colors.white70,
       ),
     );
   }
@@ -324,11 +364,12 @@ class _RepeatableActionButtonState extends State<_RepeatableActionButton> {
   @override
   void deactivate() {
     // deactivate はビルドフェーズ中に呼ばれる場合があるため setState() 不可。
-    // タイマーのみキャンセルし、_isPressed はリセットしない。
+    // タイマーをキャンセルし、_isPressed を直接リセットして再活性化時のビジュアルを正す。
     _activationTimer?.cancel();
     _activationTimer = null;
     _repeatTimer?.cancel();
     _repeatTimer = null;
+    _isPressed = false;
     super.deactivate();
   }
 
@@ -368,7 +409,7 @@ class _ActionButton extends StatelessWidget {
     this.label,
     this.icon,
     required this.onPressed,
-  });
+  }) : assert(label != null || icon != null, 'Either label or icon must be provided');
 
   final String? label;
   final IconData? icon;
@@ -376,30 +417,17 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Material(
-        color: Colors.grey[800],
-        borderRadius: BorderRadius.circular(4),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(4),
-          onTap: onPressed,
-          child: Container(
-            constraints: const BoxConstraints(minWidth: 40, minHeight: 36),
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: icon != null
-                ? Icon(icon, size: 18, color: Colors.white)
-                : Text(
-                    label!,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                    ),
-                  ),
-          ),
-        ),
-      ),
+    return _BarButton(
+      onPressed: onPressed,
+      child: icon != null
+          ? Icon(icon, size: 18, color: Colors.white)
+          : Text(
+              label!,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+              ),
+            ),
     );
   }
 }

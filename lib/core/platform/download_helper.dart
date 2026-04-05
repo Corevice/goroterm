@@ -7,7 +7,7 @@ import 'package:share_plus/share_plus.dart';
 /// Android: MediaStore API で Downloads フォルダに保存（ユーザー操作不要）。
 /// iOS/その他: share_plus でシェアシートを表示。
 class DownloadHelper {
-  static const _channel = MethodChannel('com.example.terminal_ssh_app/downloads');
+  static const _channel = MethodChannel('com.corevice.goroterm/downloads');
 
   /// 一時ファイルを Downloads に保存し、ファイル名を返す。
   /// 一時ファイルは保存後に削除される（Android）。

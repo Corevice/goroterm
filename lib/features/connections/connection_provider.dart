@@ -49,15 +49,7 @@ class ConnectionListNotifier extends AsyncNotifier<List<Connection>> {
       authMethod: Value(authMethod),
     ));
 
-    final secureStorage = ref.read(secureStorageProvider);
-    if (password != null && password.isNotEmpty) {
-      await secureStorage.savePassword(id, password);
-    }
-    if (privateKeyPem != null && privateKeyPem.isNotEmpty) {
-      await secureStorage.savePrivateKey(id, privateKeyPem);
-    }
-
-    ref.invalidateSelf();
+    await _saveCredentials(id, password, privateKeyPem);
     return id;
   }
 
@@ -83,23 +75,55 @@ class ConnectionListNotifier extends AsyncNotifier<List<Connection>> {
       ),
     );
 
-    final secureStorage = ref.read(secureStorageProvider);
-    if (password != null) {
-      await secureStorage.savePassword(id, password);
-    }
-    if (privateKeyPem != null) {
-      await secureStorage.savePrivateKey(id, privateKeyPem);
-    }
+    await _saveCredentials(id, password, privateKeyPem);
+  }
 
-    ref.invalidateSelf();
+  /// Saves [password] and/or [privateKeyPem] to secure storage for the given
+  /// connection [id], then invalidates this notifier to trigger a rebuild.
+  /// Always calls [ref.invalidateSelf] even if the storage write fails, so that
+  /// the connection list stays consistent with the database.
+  ///
+  /// Credential semantics:
+  ///   - `null`  → not applicable (auth method doesn't use this credential);
+  ///              leave secure storage unchanged.
+  ///   - `''`    → user explicitly cleared the field; delete stored value.
+  ///   - non-empty → save the new value.
+  Future<void> _saveCredentials(
+    int id,
+    String? password,
+    String? privateKeyPem,
+  ) async {
+    try {
+      final secureStorage = ref.read(secureStorageProvider);
+      if (password != null) {
+        if (password.isNotEmpty) {
+          await secureStorage.savePassword(id, password);
+        } else {
+          await secureStorage.deletePassword(id);
+        }
+      }
+      if (privateKeyPem != null) {
+        if (privateKeyPem.isNotEmpty) {
+          await secureStorage.savePrivateKey(id, privateKeyPem);
+        } else {
+          await secureStorage.deletePrivateKey(id);
+        }
+      }
+    } finally {
+      ref.invalidateSelf();
+    }
   }
 
   Future<void> deleteConnection(int id) async {
-    final repo = ref.read(connectionRepositoryProvider);
-    await repo.delete(id);
-    final secureStorage = ref.read(secureStorageProvider);
-    await secureStorage.deleteAllForConnection(id);
-    ref.invalidateSelf();
+    // ConnectionRepository.delete() already cleans up secure storage
+    // internally, so we do not call secureStorage.deleteAllForConnection here.
+    // Always call invalidateSelf() so the UI list stays in sync even if the
+    // database delete throws (mirrors the try/finally in _saveCredentials).
+    try {
+      await ref.read(connectionRepositoryProvider).delete(id);
+    } finally {
+      ref.invalidateSelf();
+    }
   }
 }
 

@@ -168,7 +168,9 @@ void main() {
       await tester.pump();
 
       await tester.tap(find.byIcon(Icons.add));
-      await tester.pumpAndSettle();
+      // Use pump with explicit duration instead of pumpAndSettle to avoid
+      // blocking on TextField cursor blink animation (infinite repeating timer).
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.text('New tmux Session'), findsOneWidget);
       expect(find.text('Create'), findsOneWidget);

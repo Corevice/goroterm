@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ssh/ssh_channel_manager.dart';
+import '../../core/utils/format_utils.dart';
 import '../terminal/terminal_connection_provider.dart';
+import 'server_info_parser.dart';
 
 /// サーバーリソースモニター。SSH 経由でシステム情報を取得しボトムシートで表示する。
 class ServerMonitorDialog extends ConsumerStatefulWidget {
@@ -35,15 +37,16 @@ class ServerMonitorDialog extends ConsumerStatefulWidget {
 
 class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
   bool _loading = true;
+  bool _fetching = false;
   String? _error;
-  _ServerInfo? _info;
+  ServerInfo? _info;
   Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _fetchInfo();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       _fetchInfo();
     });
   }
@@ -55,10 +58,14 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
   }
 
   Future<void> _fetchInfo() async {
-    // 初回・手動リフレッシュ時（_loading == true）はエラーをクリアする。
-    // Timer.periodic による自動更新時は _loading == false のため、
-    // ローディングスピナーを再表示せず既存の表示を維持する。
-    if (_loading) setState(() => _error = null);
+    // 前回の fetch がまだ完了していなければスキップ（重複リクエスト防止）
+    if (_fetching) return;
+    // setState で _fetching = true を反映し、Refresh ボタンを即座に非表示にする。
+    // 初回・手動リフレッシュ時（_loading == true）はエラーもクリアする。
+    setState(() {
+      _fetching = true;
+      if (_loading) _error = null;
+    });
 
     try {
       final channelManager = ref
@@ -86,16 +93,33 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
         _loading = false;
         _error = e.toString();
       });
+    } finally {
+      // setState is intentionally omitted here.
+      //
+      // Dart's event loop guarantees that the `finally` block runs
+      // synchronously in the same microtask as the `return` that ends
+      // the try/catch — BEFORE the frame that was scheduled by the
+      // preceding `setState` call is actually rendered.  When Flutter
+      // builds that frame it reads `_fetching` and already sees `false`,
+      // so the Refresh button reappears without an extra rebuild.
+      //
+      // The one exception is the `if (!mounted) return` early-exit paths,
+      // where no preceding `setState` was called.  In those cases the
+      // widget is unmounted and rebuilding it would be incorrect anyway.
+      _fetching = false;
     }
   }
 
   static const _command = r"""echo '===HOSTNAME===' && hostname && echo '===UNAME===' && uname -sr && echo '===UPTIME===' && (uptime -p 2>/dev/null || uptime) && echo '===LOADAVG===' && cat /proc/loadavg && echo '===MEMORY===' && free -b | head -2 && echo '===DISK===' && (df -B1 --output=target,size,used,avail,pcent -x tmpfs -x devtmpfs 2>/dev/null || df -k) && echo '===PROCS===' && ps aux --sort=-%cpu | head -6 && echo '===END==='""";
 
-  Future<_ServerInfo> _queryServerInfo(
+  Future<ServerInfo> _queryServerInfo(
       SshChannelManager channelManager) async {
-    final output = await channelManager.runCommand(_command);
+    final output = await channelManager.runCommand(_command).timeout(
+      const Duration(seconds: 30),
+      onTimeout: () => throw Exception('Server monitor timed out (30s)'),
+    );
     final text = utf8.decode(output).trim();
-    return _ServerInfo.parse(text);
+    return ServerInfoParser.parse(text);
   }
 
   @override
@@ -126,7 +150,7 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
                       ),
                     ),
                   ),
-                  if (!_loading)
+                  if (!_loading && !_fetching)
                     IconButton(
                       icon: const Icon(Icons.refresh, color: Colors.white70),
                       onPressed: () {
@@ -218,7 +242,7 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
         const SizedBox(height: 12),
 
         // Memory card
-        if (info.memTotal > 0)
+        if (info.memTotal > 0) ...[
           _buildCard(
             icon: Icons.memory,
             title: 'Memory',
@@ -228,17 +252,15 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: LinearProgressIndicator(
-                    value: info.memTotal > 0
-                        ? info.memUsed / info.memTotal
-                        : 0,
+                    value: info.memUsed / info.memTotal,
                     backgroundColor: Colors.white12,
-                    color: _memColor(info.memUsed / info.memTotal),
+                    color: _usageColor(info.memUsed / info.memTotal),
                     minHeight: 8,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '${_formatBytes(info.memUsed)} / ${_formatBytes(info.memTotal)} '
+                  '${humanReadableSize(info.memUsed)} / ${humanReadableSize(info.memTotal)} '
                   '(${(info.memUsed / info.memTotal * 100).toStringAsFixed(1)}%)',
                   style:
                       const TextStyle(color: Colors.white70, fontSize: 13),
@@ -246,10 +268,11 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
               ],
             ),
           ),
-        if (info.memTotal > 0) const SizedBox(height: 12),
+          const SizedBox(height: 12),
+        ],
 
         // Disk card
-        if (info.disks.isNotEmpty)
+        if (info.disks.isNotEmpty) ...[
           _buildCard(
             icon: Icons.storage,
             title: 'Disk',
@@ -293,13 +316,13 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
                               child: LinearProgressIndicator(
                                 value: d.usedPercent / 100,
                                 backgroundColor: Colors.white12,
-                                color: _diskColor(d.usedPercent),
+                                color: _usageColor(d.usedPercent / 100),
                                 minHeight: 6,
                               ),
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              '${_formatBytes(d.used)} / ${_formatBytes(d.size)}',
+                              '${humanReadableSize(d.used)} / ${humanReadableSize(d.size)}',
                               style: const TextStyle(
                                   color: Colors.white38, fontSize: 11),
                             ),
@@ -309,7 +332,8 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
                   .toList(),
             ),
           ),
-        if (info.disks.isNotEmpty) const SizedBox(height: 12),
+          const SizedBox(height: 12),
+        ],
 
         // Processes card
         if (info.processes.isNotEmpty)
@@ -461,219 +485,12 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
     );
   }
 
-  Color _memColor(double ratio) {
+  Color _usageColor(double ratio) {
     if (ratio >= 0.9) return Colors.red;
     if (ratio >= 0.7) return Colors.orange;
     if (ratio >= 0.5) return Colors.yellow[700]!;
     return Colors.green;
   }
 
-  Color _diskColor(int percent) {
-    if (percent >= 90) return Colors.red;
-    if (percent >= 70) return Colors.orange;
-    if (percent >= 50) return Colors.yellow[700]!;
-    return Colors.green;
-  }
-
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
-  }
 }
 
-// ---------------------------------------------------------------------------
-// Data models
-// ---------------------------------------------------------------------------
-
-class _ServerInfo {
-  _ServerInfo({
-    required this.hostname,
-    required this.uname,
-    required this.uptime,
-    required this.loadAvg1,
-    required this.loadAvg5,
-    required this.loadAvg15,
-    required this.memTotal,
-    required this.memUsed,
-    required this.disks,
-    required this.processes,
-  });
-
-  final String hostname;
-  final String uname;
-  final String uptime;
-  final String loadAvg1;
-  final String loadAvg5;
-  final String loadAvg15;
-  final int memTotal;
-  final int memUsed;
-  final List<_DiskInfo> disks;
-  final List<_ProcessInfo> processes;
-
-  factory _ServerInfo.parse(String text) {
-    final sections = <String, String>{};
-    final sectionOrder = [
-      'HOSTNAME',
-      'UNAME',
-      'UPTIME',
-      'LOADAVG',
-      'MEMORY',
-      'DISK',
-      'PROCS',
-    ];
-
-    for (final name in sectionOrder) {
-      final startTag = '===$name===';
-      final startIdx = text.indexOf(startTag);
-      if (startIdx == -1) continue;
-
-      final contentStart = startIdx + startTag.length;
-      // Find the next section marker or END
-      var endIdx = text.length;
-      for (final nextName in [...sectionOrder, 'END']) {
-        final nextTag = '===$nextName===';
-        final nextIdx = text.indexOf(nextTag, contentStart);
-        if (nextIdx != -1 && nextIdx < endIdx) {
-          endIdx = nextIdx;
-        }
-      }
-      sections[name] = text.substring(contentStart, endIdx).trim();
-    }
-
-    // Parse load average
-    final loadParts =
-        (sections['LOADAVG'] ?? '0 0 0').split(RegExp(r'\s+'));
-    final loadAvg1 = loadParts.isNotEmpty ? loadParts[0] : '0';
-    final loadAvg5 = loadParts.length > 1 ? loadParts[1] : '0';
-    final loadAvg15 = loadParts.length > 2 ? loadParts[2] : '0';
-
-    // Parse memory (free -b output)
-    int memTotal = 0;
-    int memUsed = 0;
-    final memLines = (sections['MEMORY'] ?? '').split('\n');
-    if (memLines.length >= 2) {
-      final parts = memLines[1].split(RegExp(r'\s+'));
-      // Mem: total used free shared buff/cache available
-      if (parts.length >= 3) {
-        memTotal = int.tryParse(parts[1]) ?? 0;
-        memUsed = int.tryParse(parts[2]) ?? 0;
-      }
-    }
-
-    // Parse disk
-    // Two possible formats:
-    //   df -B1 --output=target,size,used,avail,pcent (Linux):
-    //     header starts with "Mounted on", sizes in bytes, mount is col 0
-    //   df -k fallback (macOS/BSD/Linux):
-    //     header starts with "Filesystem", sizes in 1K-blocks, mount is last col
-    final diskLines = (sections['DISK'] ?? '').split('\n');
-    final disks = <_DiskInfo>[];
-    final isDfKFormat = diskLines.isNotEmpty &&
-        diskLines[0].trim().toLowerCase().startsWith('filesystem');
-    for (var i = 0; i < diskLines.length; i++) {
-      final line = diskLines[i].trim();
-      if (line.isEmpty || i == 0) continue; // skip header
-      final parts = line.split(RegExp(r'\s+'));
-      if (isDfKFormat) {
-        // df -k: Filesystem 1K-blocks Used Available Use% [iused ifree %iused] Mounted-on
-        if (parts.length >= 6) {
-          final mountPoint = parts.last;
-          final sizeKb = int.tryParse(parts[1]) ?? 0;
-          final usedKb = int.tryParse(parts[2]) ?? 0;
-          final percentStr = parts[4].replaceAll('%', '');
-          final percent = int.tryParse(percentStr) ?? 0;
-          final size = sizeKb * 1024;
-          final used = usedKb * 1024;
-          if (size > 0) {
-            disks.add(_DiskInfo(
-              mountPoint: mountPoint,
-              size: size,
-              used: used,
-              usedPercent: percent,
-            ));
-          }
-        }
-      } else {
-        // df -B1 --output=target,size,used,avail,pcent: mount is col 0, sizes in bytes
-        if (parts.length >= 5) {
-          final mountPoint = parts[0];
-          final size = int.tryParse(parts[1]) ?? 0;
-          final used = int.tryParse(parts[2]) ?? 0;
-          final percentStr = parts[4].replaceAll('%', '');
-          final percent = int.tryParse(percentStr) ?? 0;
-          if (size > 0) {
-            disks.add(_DiskInfo(
-              mountPoint: mountPoint,
-              size: size,
-              used: used,
-              usedPercent: percent,
-            ));
-          }
-        }
-      }
-    }
-
-    // Parse processes
-    final procLines = (sections['PROCS'] ?? '').split('\n');
-    final processes = <_ProcessInfo>[];
-    for (var i = 0; i < procLines.length; i++) {
-      final line = procLines[i].trim();
-      if (line.isEmpty || i == 0) continue; // skip header
-      final parts = line.split(RegExp(r'\s+'));
-      // USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND...
-      if (parts.length >= 11) {
-        final cpuPercent = parts[2];
-        final memPercent = parts[3];
-        final command = parts.sublist(10).join(' ');
-        processes.add(_ProcessInfo(
-          command: command,
-          cpuPercent: cpuPercent,
-          memPercent: memPercent,
-        ));
-      }
-    }
-
-    return _ServerInfo(
-      hostname: sections['HOSTNAME'] ?? 'unknown',
-      uname: sections['UNAME'] ?? 'unknown',
-      uptime: sections['UPTIME'] ?? 'unknown',
-      loadAvg1: loadAvg1,
-      loadAvg5: loadAvg5,
-      loadAvg15: loadAvg15,
-      memTotal: memTotal,
-      memUsed: memUsed,
-      disks: disks,
-      processes: processes,
-    );
-  }
-}
-
-class _DiskInfo {
-  _DiskInfo({
-    required this.mountPoint,
-    required this.size,
-    required this.used,
-    required this.usedPercent,
-  });
-
-  final String mountPoint;
-  final int size;
-  final int used;
-  final int usedPercent;
-}
-
-class _ProcessInfo {
-  _ProcessInfo({
-    required this.command,
-    required this.cpuPercent,
-    required this.memPercent,
-  });
-
-  final String command;
-  final String cpuPercent;
-  final String memPercent;
-}

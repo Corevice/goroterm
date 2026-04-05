@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../../../core/utils/shell_utils.dart';
 import 'composition_buffer.dart';
 
 typedef SendToSshCallback = void Function(String text);
@@ -72,12 +73,7 @@ class ImeInputHandler {
   }
 
   void onPaste(String text) {
-    final sanitized = _sanitizeForTerminal(text);
-    onSendToSsh(sanitized);
-  }
-
-  String _sanitizeForTerminal(String text) {
-    return text.replaceAll('\r\n', '\r').replaceAll('\n', '\r');
+    onSendToSsh(sanitizeForTerminal(text));
   }
 
   void reset() {

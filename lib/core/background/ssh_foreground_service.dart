@@ -28,10 +28,10 @@ class SshForegroundService {
         showNotification: false,
       ),
       foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(10000),
+        eventAction: ForegroundTaskEventAction.repeat(60000),
         autoRunOnBoot: false,
-        allowWakeLock: true,
-        allowWifiLock: true,
+        allowWakeLock: false,
+        allowWifiLock: false,
       ),
     );
   }
@@ -116,8 +116,8 @@ class _KeepAliveTaskHandler extends TaskHandler {
   @override
   void onRepeatEvent(DateTime timestamp) {
     _tickCount++;
-    // 6回（60秒）に1回だけログ出力（頻繁すぎるとログが溢れる）
-    if (_tickCount % 6 == 0) {
+    // 2回（120秒）に1回だけログ出力（頻繁すぎるとログが溢れる）
+    if (_tickCount % 2 == 0) {
       debugPrint('[SSH][service] onRepeatEvent tick #$_tickCount');
     }
     FlutterForegroundTask.sendDataToMain('keepalive');

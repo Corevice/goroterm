@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../core/navigation/navigator_key.dart';
+import '../../core/network/connectivity_monitor.dart';
 import '../../core/notification/notification_service.dart';
 import '../../core/ssh/connection_config.dart';
 import '../../core/ssh/ssh_client_service.dart';
@@ -15,6 +16,7 @@ import '../../core/utils/shell_utils.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/ssh/known_hosts_store.dart';
 import 'host_key_dialog.dart';
+import 'session_manager.dart';
 
 enum ConnectionStatus {
   connecting,
@@ -50,13 +52,15 @@ class TerminalConnectionState {
     String? errorMessage,
     SshChannelManager? channelManager,
     bool clearChannelManager = false,
+    bool clearErrorMessage = false,
     bool? shellExited,
   }) {
     return TerminalConnectionState(
       status: status ?? this.status,
       terminal: terminal ?? this.terminal,
       hostLabel: hostLabel ?? this.hostLabel,
-      errorMessage: errorMessage ?? this.errorMessage,
+      errorMessage:
+          clearErrorMessage ? null : (errorMessage ?? this.errorMessage),
       channelManager: clearChannelManager
           ? null
           : (channelManager ?? this.channelManager),
@@ -70,7 +74,7 @@ class TerminalConnectionNotifier
   SshClientService? _sshService;
   SshChannelManager? _channelManager;
   StreamSubscription? _stdoutSubscription;
-  StreamSubscription? _doneSubscription;
+  bool _doneCancelled = false;
   ConnectionConfig? _config;
   String? _password;
   String? _privateKeyPem;
@@ -110,18 +114,55 @@ class TerminalConnectionNotifier
   // コマンド完了通知: バックグラウンド時に出力が一定時間止まったら通知
   Timer? _idleNotifyTimer;
   int _outputBytesSinceLastIdle = 0;
-  static const int _idleNotifyThresholdBytes = 256; // この量以上出力があった後の静止を検知
-  static const Duration _idleNotifyDelay = Duration(seconds: 5);
+  static const int _idleNotifyThresholdBytes = 4096; // tmuxステータス更新を除外するため十分大きく
+  static const Duration _idleNotifyDelay = Duration(seconds: 30);
   static bool _isAppInBackground = false;
+  /// 通知済みフラグ: 一度通知を送ったら、ユーザーがタブを確認するまで再通知しない
+  bool _notificationSent = false;
 
   /// アプリのライフサイクル状態を更新する（TerminalScreen から呼ばれる）
   static void setAppInBackground(bool value) {
     _isAppInBackground = value;
   }
 
+  /// ユーザーがこのタブを確認したことを記録し、通知済みフラグ＋バイトカウントをリセットする。
+  void clearNotificationFlag() {
+    _notificationSent = false;
+    _outputBytesSinceLastIdle = 0;
+    _idleNotifyTimer?.cancel();
+    _idleNotifyTimer = null;
+  }
+
+  /// バックグラウンド移行時にバイトカウントをリセットする。
+  /// フォアグラウンドで蓄積された出力量がバックグラウンドの通知判定に使われないようにする。
+  void resetIdleCounter() {
+    _outputBytesSinceLastIdle = 0;
+    _idleNotifyTimer?.cancel();
+    _idleNotifyTimer = null;
+  }
+
   @override
   TerminalConnectionState build(String arg) {
     ref.onDispose(_cleanup);
+
+    // ネットワークが disconnected → connected に遷移したとき、バックオフタイマーを
+    // キャンセルして即座に再接続を試みる。これにより Wi-Fi 復旧後の待ち時間を解消する。
+    ref.listen(connectivityProvider, (previous, next) {
+      if (previous == NetworkStatus.disconnected &&
+          next == NetworkStatus.connected &&
+          _config != null &&
+          !_isReconnecting &&
+          (state.status == ConnectionStatus.disconnected ||
+              state.status == ConnectionStatus.reconnecting)) {
+        AppLogger.instance
+            .log('[SSH][$arg] network restored, reconnecting immediately');
+        _retryCount = 0;
+        _retryTimer?.cancel();
+        _retryTimer = null;
+        _attemptReconnect();
+      }
+    });
+
     return const TerminalConnectionState();
   }
 
@@ -156,12 +197,7 @@ class TerminalConnectionNotifier
         passphrase: passphrase,
       );
       AppLogger.instance.log('[SSH][$arg] connected');
-      _retryCount = 0;
-      state = state.copyWith(
-        status: ConnectionStatus.connected,
-        terminal: terminal,
-        channelManager: _channelManager,
-      );
+      _setConnectedState(terminal);
     } catch (e) {
       _cleanupConnections();
       AppLogger.instance.log('[SSH][$arg] connect failed: $e');
@@ -182,42 +218,30 @@ class TerminalConnectionNotifier
     String? passphrase,
     Terminal? existingTerminal,
   }) async {
-    // 旧 done subscription を先にキャンセルしてレース条件を防ぐ
-    _doneSubscription?.cancel();
-    _doneSubscription = null;
-    _sshService = SshClientService(knownHostsStore: KnownHostsStore());
+    // 旧 done callback を先に無効化してレース条件を防ぐ
+    _doneCancelled = true;
+    _sshService = sshServiceFactoryOverride != null
+        ? sshServiceFactoryOverride!()
+        : SshClientService(knownHostsStore: KnownHostsStore());
     final client = await _sshService!.connect(
       config: config,
       password: password,
       privateKeyPem: privateKeyPem,
       passphrase: passphrase,
-      onUnknownHostKey: (fingerprint) async {
-        final ctx = globalNavigatorKey.currentContext;
-        if (ctx == null) return false;
-        return await showDialog<bool>(
-              context: ctx,
-              barrierDismissible: false,
-              builder: (_) => UnknownHostKeyDialog(
-                host: config.host,
-                fingerprint: fingerprint,
-              ),
-            ) ??
-            false;
-      },
-      onHostKeyMismatch: (storedFingerprint, actualFingerprint) async {
-        final ctx = globalNavigatorKey.currentContext;
-        if (ctx == null) return false;
-        return await showDialog<bool>(
-              context: ctx,
-              barrierDismissible: false,
-              builder: (_) => HostKeyMismatchDialog(
-                host: config.host,
-                storedFingerprint: storedFingerprint,
-                actualFingerprint: actualFingerprint,
-              ),
-            ) ??
-            false;
-      },
+      onUnknownHostKey: (fingerprint) => _showHostKeyDialog(
+        (_) => UnknownHostKeyDialog(
+          host: config.host,
+          fingerprint: fingerprint,
+        ),
+      ),
+      onHostKeyMismatch: (storedFingerprint, actualFingerprint) =>
+          _showHostKeyDialog(
+        (_) => HostKeyMismatchDialog(
+          host: config.host,
+          storedFingerprint: storedFingerprint,
+          actualFingerprint: actualFingerprint,
+        ),
+      ),
     );
 
     _channelManager = SshChannelManager(client: client);
@@ -268,16 +292,29 @@ class TerminalConnectionNotifier
       },
     );
 
-    // 現在のクライアント参照を保持し、古いクライアントの done イベントを無視する
+    // 現在のクライアント参照を保持し、古いクライアントの done イベントを無視する。
+    // Future はキャンセル不可のため _doneCancelled フラグで無効化する。
     final currentClient = client;
-    _doneSubscription = client.done.asStream().listen((_) {
-      if (_sshService?.client == currentClient) {
+    _doneCancelled = false;
+    client.done.whenComplete(() {
+      if (!_doneCancelled && _sshService?.client == currentClient) {
         AppLogger.instance.log('[SSH][$arg] client.done fired');
         _onDisconnected();
       }
     });
 
     return terminal;
+  }
+
+  Future<bool> _showHostKeyDialog(Widget Function(BuildContext) builder) async {
+    final ctx = globalNavigatorKey.currentContext;
+    if (ctx == null) return false;
+    return await showDialog<bool>(
+          context: ctx,
+          barrierDismissible: false,
+          builder: builder,
+        ) ??
+        false;
   }
 
   void _flushOutput(Terminal terminal) {
@@ -391,16 +428,17 @@ class TerminalConnectionNotifier
       if (existingTerminal != null) {
         terminal.write('\r\n\x1B[33m--- Reconnected ---\x1B[0m\r\n');
       }
-      _retryCount = 0;
-      _keepAliveFailCount = 0;
-      state = state.copyWith(
-        status: ConnectionStatus.connected,
-        terminal: terminal,
-        channelManager: _channelManager,
-      );
+      _setConnectedState(terminal);
       _autoReattachTmux(terminal);
     } catch (e) {
       AppLogger.instance.log('[SSH][$arg] reconnect failed: $e');
+      // _connectCore() が部分的に確立した SSH サービスを即座に解放する。
+      // connect() の catch と同様に、次のリトライまでソケットを保持しないよう
+      // ここで disconnect / dispose を行う。
+      try { _sshService?.disconnect(); } catch (_) {}
+      _sshService = null;
+      _channelManager?.dispose();
+      _channelManager = null;
       state = state.copyWith(
         status: ConnectionStatus.disconnected,
         terminal: existingTerminal,
@@ -439,6 +477,11 @@ class TerminalConnectionNotifier
         _channelManager?.resizePty(w, h);
         AppLogger.instance.log('[SSH][$arg] resized PTY after tmux attach: ${w}x$h');
       }
+    }).catchError((Object e) {
+      // 再接続タイミングによっては resizePty 等が例外を投げる可能性がある。
+      // unawaited のまま伝播させると未処理エラーになるため、ここでキャッチして
+      // ログのみ残す（再接続フローへの影響はない）。
+      AppLogger.instance.log('[SSH][$arg] auto-reattach error: $e');
     }));
   }
 
@@ -568,6 +611,12 @@ class TerminalConnectionNotifier
     state = connectedState;
   }
 
+  /// テスト専用: _connectCore() 内で生成される SshClientService を置き換える。
+  /// null の場合は実際の SshClientService が使われる。
+  /// これにより実際のネットワーク接続なしに reconnect パスをテストできる。
+  @visibleForTesting
+  SshClientService Function()? sshServiceFactoryOverride;
+
   /// テスト専用: _scheduleReconnect() を直接呼び出す。
   /// 指数バックオフのステート変化をタイマー発火なしに検証するために使用する。
   @visibleForTesting
@@ -606,6 +655,37 @@ class TerminalConnectionNotifier
   void autoReattachTmuxForTesting(Terminal terminal) =>
       _autoReattachTmux(terminal);
 
+  /// テスト専用: _setConnectedState() を直接呼び出す。
+  /// connect() / _attemptReconnect() 成功パスの状態遷移を
+  /// 実際の SSH 接続なしに検証するために使用する。
+  @visibleForTesting
+  void callSetConnectedStateForTesting(Terminal terminal) =>
+      _setConnectedState(terminal);
+
+  /// テスト専用: _isAppInBackground 静的フラグの現在値を返す。
+  @visibleForTesting
+  static bool get isAppInBackgroundForTesting => _isAppInBackground;
+
+  /// テスト専用: _idleNotifyTimer がアクティブかどうかを返す。
+  @visibleForTesting
+  bool get isIdleTimerActiveForTesting => _idleNotifyTimer != null;
+
+  /// テスト専用: _notificationSent フラグの現在値を返す。
+  @visibleForTesting
+  bool get isNotificationSentForTesting => _notificationSent;
+
+  /// テスト専用: _notificationSent フラグを直接セットする。
+  @visibleForTesting
+  void setNotificationSentForTesting(bool value) => _notificationSent = value;
+
+  /// テスト専用: _outputBytesSinceLastIdle に [n] バイトを加算し
+  /// _resetIdleNotifyTimer() を呼び出す。stdoutSubscription からの出力受信を模倣する。
+  @visibleForTesting
+  void addOutputBytesForTesting(int n) {
+    _outputBytesSinceLastIdle += n;
+    _resetIdleNotifyTimer();
+  }
+
   /// テスト専用: _resizeGuardActive を直接設定する。
   @visibleForTesting
   void setResizeGuardActiveForTesting(bool value) =>
@@ -622,33 +702,57 @@ class TerminalConnectionNotifier
     return _outputBuffer.toString();
   }
 
-  /// Cancels SSH subscriptions and disposes resources without clearing state.
+  /// テスト専用: _stdoutSubscription の onDone コールバックと同じロジックを実行する。
+  /// シェルの stdout ストリームが閉じた（PTY 終了）時の挙動をテストするために使用する。
+  @visibleForTesting
+  void triggerStdoutDoneForTesting() {
+    if (state.status == ConnectionStatus.connected &&
+        (_sshService?.isConnected ?? false)) {
+      state = state.copyWith(shellExited: true);
+    }
+  }
+
+  /// テスト専用: _handlePrivateOSC を直接呼び出す。
+  /// OSC 52 クリップボード統合のユニットテストに使用する。
+  @visibleForTesting
+  void handlePrivateOscForTesting(String code, List<String> args) =>
+      _handlePrivateOSC(code, args);
+
   /// OSC 52 クリップボード書き込みを処理する。
   /// Claude Code の /copy コマンド等が ESC ] 52 ; c ; [base64] ST を送信する。
   void _handlePrivateOSC(String code, List<String> args) {
     AppLogger.instance.log('[SSH][$arg] onPrivateOSC: code=$code, args.length=${args.length}');
-    if (code != '52') return;
-    if (args.length < 2) return;
-    // args[0] = clipboard target (e.g. "c"), args[1] = base64 data
-    final b64 = args[1];
-    if (b64.isEmpty) return;
-    try {
-      final decoded = utf8.decode(base64Decode(b64));
-      Clipboard.setData(ClipboardData(text: decoded));
-      AppLogger.instance.log('[SSH][$arg] OSC 52: copied ${decoded.length} chars to clipboard');
-    } catch (e) {
-      AppLogger.instance.log('[SSH][$arg] OSC 52 decode error: $e');
-    }
+    final text = decodeOsc52Clipboard(code, args);
+    if (text == null) return;
+    Clipboard.setData(ClipboardData(text: text));
+    AppLogger.instance.log('[SSH][$arg] OSC 52: copied ${text.length} chars to clipboard');
   }
 
   void _resetIdleNotifyTimer() {
     _idleNotifyTimer?.cancel();
+    // フォアグラウンド時はタイマーを設定しない（バイトカウントのみ蓄積）
+    if (!_isAppInBackground) return;
+    if (_notificationSent) return;
     if (_outputBytesSinceLastIdle < _idleNotifyThresholdBytes) return;
 
     _idleNotifyTimer = Timer(_idleNotifyDelay, () {
-      if (_isAppInBackground && _outputBytesSinceLastIdle >= _idleNotifyThresholdBytes) {
+      _idleNotifyTimer = null;
+      if (_isAppInBackground &&
+          !_notificationSent &&
+          _outputBytesSinceLastIdle >= _idleNotifyThresholdBytes) {
         final host = _config?.host ?? 'server';
-        NotificationService.instance.showCommandFinished(host: host);
+        // セッションマネージャからタブ名を取得
+        final sessions = ref.read(sessionManagerProvider).sessions;
+        final tabLabel = sessions
+            .where((s) => s.sessionId == arg)
+            .map((s) => s.label)
+            .firstOrNull;
+        NotificationService.instance.showCommandFinished(
+          host: host,
+          sessionId: arg,
+          tabLabel: tabLabel,
+        );
+        _notificationSent = true;
       }
       _outputBytesSinceLastIdle = 0;
     });
@@ -657,6 +761,25 @@ class TerminalConnectionNotifier
   /// Terminal.onOutput コールバック。
   void _onTerminalOutput(String data) {
     _channelManager?.ptySession?.write(utf8.encoder.convert(data));
+  }
+
+  /// 接続成功時に共通の状態遷移を行う。
+  /// [connect] と [_attemptReconnect] の両パスで使用する。
+  void _setConnectedState(Terminal terminal) {
+    _retryCount = 0;
+    _keepAliveFailCount = 0;
+    // 再接続後も通知を送れるようにフラグをリセットする。
+    // clearNotificationFlag() はユーザーがタブを確認したときに呼ばれるが、
+    // 再接続（新しいシェルセッション開始）時にも通知フラグをリセットしないと、
+    // 以前のセッションで通知を送った後の再接続時に通知が送られなくなる。
+    _notificationSent = false;
+    state = state.copyWith(
+      status: ConnectionStatus.connected,
+      terminal: terminal,
+      channelManager: _channelManager,
+      clearErrorMessage: true,
+      shellExited: false,
+    );
   }
 
   void _cleanupConnections() {
@@ -673,11 +796,10 @@ class TerminalConnectionNotifier
     _resizeGuardActive = false;
     _outputBuffer.clear();
     _stdoutSubscription?.cancel();
-    _doneSubscription?.cancel();
+    _doneCancelled = true;
     _channelManager?.dispose();
     _sshService?.disconnect();
     _stdoutSubscription = null;
-    _doneSubscription = null;
     _channelManager = null;
     _sshService = null;
   }
@@ -693,3 +815,26 @@ final terminalConnectionProvider = NotifierProvider.family<
     TerminalConnectionNotifier, TerminalConnectionState, String>(
   TerminalConnectionNotifier.new,
 );
+
+/// Decodes an OSC 52 clipboard write sequence.
+///
+/// Returns the decoded UTF-8 text, or null when:
+///   - [code] is not '52'
+///   - [args] has fewer than 2 elements
+///   - [args[1]] (the base64 payload) is empty
+///   - the base64 data cannot be decoded as valid UTF-8
+///
+/// This is a pure function exposed for unit testing without platform-channel
+/// dependencies (Clipboard). The caller is responsible for writing the result
+/// to the clipboard.
+String? decodeOsc52Clipboard(String code, List<String> args) {
+  if (code != '52') return null;
+  if (args.length < 2) return null;
+  final b64 = args[1];
+  if (b64.isEmpty) return null;
+  try {
+    return utf8.decode(base64Decode(b64));
+  } catch (_) {
+    return null;
+  }
+}

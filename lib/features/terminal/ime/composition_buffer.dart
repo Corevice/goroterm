@@ -39,28 +39,8 @@ class CompositionBuffer {
       return current.substring(previous.length);
     }
 
-    // Text was replaced (e.g., predictive conversion)
-    // Find common prefix and return the rest
-    int commonLen = 0;
-    final minLen = previous.length < current.length
-        ? previous.length
-        : current.length;
-    for (int i = 0; i < minLen; i++) {
-      if (previous[i] == current[i]) {
-        commonLen++;
-      } else {
-        break;
-      }
-    }
-
-    if (commonLen == previous.length) {
-      // Previous is a prefix of current
-      return current.substring(commonLen);
-    }
-
-    // Text was replaced entirely (predictive conversion, etc.)
-    // Send backspaces for the changed portion, then the new text
-    // For simplicity and correctness, send the full current text
+    // Text was replaced entirely (predictive conversion, etc.).
+    // Send the full current text.
     return current;
   }
 

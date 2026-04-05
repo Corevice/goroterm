@@ -4,9 +4,11 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:flutter/foundation.dart';
 
 // ignore: unused_import (ZLibDecoder is used in _isolateEntry)
 import 'dart:convert' show utf8;
+import '../utils/shell_utils.dart';
 
 /// バックグラウンド Isolate でファイルダウンロードを完全に実行する。
 /// SSH 接続の確立 → SFTP ダウンロード → ファイル書き込みを
@@ -14,7 +16,7 @@ import 'dart:convert' show utf8;
 class DownloadIsolate {
   DownloadIsolate._(this._isolate, this._progressPort, this._resultPort);
 
-  final Isolate _isolate;
+  final Isolate? _isolate;
   final ReceivePort _progressPort;
   final ReceivePort _resultPort;
 
@@ -34,10 +36,20 @@ class DownloadIsolate {
 
   /// ダウンロードをキャンセルする。
   void cancel() {
-    _isolate.kill(priority: Isolate.immediate);
+    _isolate?.kill(priority: Isolate.immediate);
     _progressPort.close();
     _resultPort.close();
   }
+
+  /// テスト用: 実 Isolate を生成せず、外部から制御できる [DownloadIsolate] を作成する。
+  /// [progressPort] と [resultPort] にメッセージを送ることでダウンロード完了や
+  /// エラーをシミュレートできる。
+  @visibleForTesting
+  static DownloadIsolate forTesting({
+    required ReceivePort progressPort,
+    required ReceivePort resultPort,
+  }) =>
+      DownloadIsolate._(null, progressPort, resultPort);
 
   /// バックグラウンド Isolate でダウンロードを開始する。
   static Future<DownloadIsolate> start({
@@ -106,9 +118,9 @@ class DownloadIsolate {
       // gzip が使えない環境では cat にフォールバック。
       final session = await client.execute(
         'if command -v gzip >/dev/null 2>&1; then '
-        'echo GZIP; gzip -1 -c ${_shellQuote(req.remotePath)}; '
+        'echo GZIP; gzip -1 -c ${shellQuote(req.remotePath)}; '
         'else '
-        'echo RAW; cat ${_shellQuote(req.remotePath)}; '
+        'echo RAW; cat ${shellQuote(req.remotePath)}; '
         'fi',
       );
 
@@ -223,11 +235,6 @@ class DownloadIsolate {
     }
   }
 
-  /// シェル引数をシングルクォートでエスケープする。
-  /// Isolate 内では他のユーティリティにアクセスできないためローカル実装。
-  static String _shellQuote(String s) {
-    return "'${s.replaceAll("'", r"'\''")}'";
-  }
 }
 
 /// dartssh2 の SSHSocket インターフェースの最小実装。

@@ -56,17 +56,7 @@ class SessionManagerNotifier extends Notifier<SessionManagerState> {
   /// Adds a new terminal session for the given connection.
   /// Returns the generated sessionId.
   String addSession({required int connectionId, required String label}) {
-    _sessionCounter++;
-    final sessionId = 'session_${connectionId}_$_sessionCounter';
-    final session = TerminalSession(
-      sessionId: sessionId,
-      connectionId: connectionId,
-      label: label,
-    );
-    final updated = [...state.sessions, session];
-    state = state.copyWith(sessions: updated, activeSessionId: sessionId);
-    _updateForegroundService(updated.length);
-    return sessionId;
+    return _createSession(connectionId: connectionId, label: label);
   }
 
   /// Removes the session and invalidates its provider.
@@ -117,12 +107,26 @@ class SessionManagerNotifier extends Notifier<SessionManagerState> {
     required int connectionId,
     required String tmuxSessionName,
   }) {
+    return _createSession(
+      connectionId: connectionId,
+      label: 'tmux: $tmuxSessionName',
+      tmuxSessionName: tmuxSessionName,
+    );
+  }
+
+  /// Creates a session, appends it to state, and starts the foreground service.
+  /// Returns the generated sessionId.
+  String _createSession({
+    required int connectionId,
+    required String label,
+    String? tmuxSessionName,
+  }) {
     _sessionCounter++;
     final sessionId = 'session_${connectionId}_$_sessionCounter';
     final session = TerminalSession(
       sessionId: sessionId,
       connectionId: connectionId,
-      label: 'tmux: $tmuxSessionName',
+      label: label,
       tmuxSessionName: tmuxSessionName,
     );
     final updated = [...state.sessions, session];

@@ -11,7 +11,7 @@ import 'dart:io';
 
 import '../../core/error/app_error.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
-import '../../core/utils/shell_utils.dart';
+import '../../core/utils/app_logger.dart';
 
 class FileBrowserState {
   const FileBrowserState({
@@ -20,6 +20,7 @@ class FileBrowserState {
     this.showHidden = false,
     this.downloadProgress,
     this.downloadedFilePath,
+    this.downloadError,
     this.uploadProgress,
     this.uploadCompleteFile,
   });
@@ -34,6 +35,9 @@ class FileBrowserState {
   /// Path of the last successfully downloaded file.
   final String? downloadedFilePath;
 
+  /// Error message from the last failed download, null when no error.
+  final String? downloadError;
+
   /// Progress 0.0–1.0 while uploading, null otherwise.
   final double? uploadProgress;
 
@@ -46,6 +50,7 @@ class FileBrowserState {
     bool? showHidden,
     Object? downloadProgress = _absent,
     Object? downloadedFilePath = _absent,
+    Object? downloadError = _absent,
     Object? uploadProgress = _absent,
     Object? uploadCompleteFile = _absent,
   }) {
@@ -59,6 +64,9 @@ class FileBrowserState {
       downloadedFilePath: identical(downloadedFilePath, _absent)
           ? this.downloadedFilePath
           : downloadedFilePath as String?,
+      downloadError: identical(downloadError, _absent)
+          ? this.downloadError
+          : downloadError as String?,
       uploadProgress: identical(uploadProgress, _absent)
           ? this.uploadProgress
           : uploadProgress as double?,
@@ -84,14 +92,39 @@ class FileBrowserState {
   static const _absent = Object();
 }
 
+/// Function type for starting a download isolate — injectable for testing.
+typedef DownloadIsolateFactory = Future<DownloadIsolate> Function({
+  required String host,
+  required int port,
+  required String username,
+  String? password,
+  String? privateKeyPem,
+  String? passphrase,
+  required String remotePath,
+  required String localPath,
+  required int totalBytes,
+});
+
+/// Function type for saving a downloaded file — injectable for testing.
+typedef SaveToDownloadsFn = Future<String> Function({
+  required String tempFilePath,
+  required String fileName,
+});
+
 class FileBrowserNotifier
     extends FamilyAsyncNotifier<FileBrowserState, String> {
   SshChannelManager? _channelManager;
   SftpClient? _sftp;
   int _loadGeneration = 0;
   bool _isDownloading = false;
+  bool _isUploading = false;
   int _downloadGeneration = 0;
   DownloadIsolate? _activeDownload;
+
+  DownloadIsolateFactory _startDownloadIsolate = DownloadIsolate.start;
+  SaveToDownloadsFn _saveToDownloads = ({required tempFilePath, required fileName}) =>
+      DownloadHelper.saveToDownloads(tempFilePath: tempFilePath, fileName: fileName);
+  Future<Directory> Function() _getTemporaryDirectory = getTemporaryDirectory;
 
   // ダウンロード専用 Isolate のための接続情報
   String? _host;
@@ -118,10 +151,44 @@ class FileBrowserNotifier
     _passphrase = passphrase;
   }
 
+  /// Returns [_sftp] or throws [NetworkError] if not initialized.
+  SftpClient get _requireSftp =>
+      _sftp ?? (throw NetworkError('SFTP not initialized'));
+
+  /// Converts [SftpStatusError.permissionDenied] to [PermissionError] and
+  /// re-throws all other errors, preserving the original stack trace.
+  static Never _rethrowSftp(Object e, StackTrace st, String path) {
+    if (e is SftpStatusError && e.code == SftpStatusCode.permissionDenied) {
+      throw PermissionError('Permission denied: $path');
+    }
+    Error.throwWithStackTrace(e, st);
+  }
+
+  /// Test hook: directly injects [sftp] and optional [channelManager]/[initialState]
+  /// without going through a real SSH connection.
+  /// Only call after the initial [build] has completed (use `.future.catchError`).
+  @visibleForTesting
+  void initForTesting({
+    required SftpClient sftp,
+    SshChannelManager? channelManager,
+    FileBrowserState? initialState,
+    DownloadIsolateFactory? startDownloadIsolate,
+    SaveToDownloadsFn? saveToDownloads,
+    Future<Directory> Function()? getTemporaryDirectory,
+  }) {
+    _channelManager = channelManager;
+    _sftp = sftp;
+    if (startDownloadIsolate != null) _startDownloadIsolate = startDownloadIsolate;
+    if (saveToDownloads != null) _saveToDownloads = saveToDownloads;
+    if (getTemporaryDirectory != null) _getTemporaryDirectory = getTemporaryDirectory;
+    state = AsyncData(initialState ?? const FileBrowserState());
+  }
+
   /// Called by TerminalScreen when the SSH channelManager changes.
   void setChannelManager(SshChannelManager? channelManager) {
     if (_channelManager == channelManager) return;
     _channelManager = channelManager;
+    try { _sftp?.close(); } catch (_) {}
     _sftp = null;
     _downloadGeneration++;
     _activeDownload?.cancel();
@@ -129,51 +196,63 @@ class FileBrowserNotifier
     if (channelManager != null) {
       _initializeState(channelManager);
     } else {
-      // ダウンロード中は AsyncError 遷移を遅延
-      // downloadFile() の finally で _channelManager == null をチェックし遷移する
-      if (!_isDownloading) {
+      // ダウンロード/アップロード中は AsyncError 遷移を遅延
+      // downloadFile()/uploadFile() の finally で _channelManager == null をチェックし遷移する
+      if (!_isDownloading && !_isUploading) {
         state = AsyncError(NetworkError('SSH not connected'), StackTrace.current);
       }
     }
   }
 
+  /// Opens an SFTP channel, resolves the initial path, and lists directory
+  /// contents. Shared by [build] and [_initializeState].
+  Future<FileBrowserState> _connectSftp(SshChannelManager channelManager) async {
+    final sftp = await channelManager.openSftpChannel();
+    // Stale check: if channelManager was replaced while we awaited, close the
+    // just-opened channel to prevent a resource leak and bail out.
+    if (_channelManager != channelManager) {
+      try { sftp.close(); } catch (_) {}
+      throw StateError('channelManager replaced during SFTP init');
+    }
+    _sftp = sftp;
+    String initialPath = '/';
+    try {
+      final resolved = await _sftp!.absolute('.');
+      if (resolved.isNotEmpty) initialPath = resolved;
+    } catch (_) {
+      // Fall back to / if absolute path resolution fails
+    }
+    final items = await _fetchItems(initialPath);
+    return FileBrowserState(currentPath: initialPath, items: items ?? []);
+  }
+
   Future<void> _initializeState(SshChannelManager channelManager) async {
     state = const AsyncLoading();
     try {
-      _sftp = await channelManager.openSftpChannel();
-      String initialPath = '/';
-      try {
-        initialPath = await _sftp!.absolute('.');
-      } catch (_) {
-        // Fall back to / if absolute path resolution fails
-      }
-      final items = await _fetchItems(initialPath);
-      state = AsyncData(FileBrowserState(
-        currentPath: initialPath,
-        items: items ?? [],
-      ));
+      final result = await _connectSftp(channelManager);
+      // Stale check: a newer setChannelManager() call may have set a different
+      // channelManager while we were waiting. Do not overwrite newer state.
+      if (_channelManager != channelManager) return;
+      state = AsyncData(result);
     } catch (e, st) {
+      if (_channelManager != channelManager) return; // stale: do not overwrite newer state
       state = AsyncError(e, st);
     }
   }
 
   @override
   Future<FileBrowserState> build(String arg) async {
+    ref.onDispose(() {
+      _activeDownload?.cancel();
+      _activeDownload = null;
+      try { _sftp?.close(); } catch (_) {}
+      _sftp = null;
+    });
     final channelManager = _channelManager;
     if (channelManager == null) {
       throw NetworkError('SSH not connected');
     }
-    _sftp = await channelManager.openSftpChannel();
-
-    String initialPath = '/';
-    try {
-      initialPath = await _sftp!.absolute('.');
-    } catch (_) {
-      // Fall back to / if absolute path resolution fails
-    }
-
-    final items = await _fetchItems(initialPath);
-    return FileBrowserState(currentPath: initialPath, items: items ?? []);
+    return _connectSftp(channelManager);
   }
 
   /// Fetch and sort directory items. Returns null if load was superseded.
@@ -193,12 +272,9 @@ class FileBrowserNotifier
           if (aIsDir != bIsDir) return aIsDir ? -1 : 1;
           return a.filename.compareTo(b.filename);
         });
-    } catch (e) {
+    } catch (e, st) {
       if (gen != _loadGeneration) return null;
-      if (e is SftpStatusError && e.code == SftpStatusCode.permissionDenied) {
-        throw PermissionError('Permission denied: $path');
-      }
-      rethrow;
+      _rethrowSftp(e, st, path);
     }
   }
 
@@ -278,7 +354,7 @@ class FileBrowserNotifier
     String remotePath, {
     int maxBytes = 1024 * 1024,
   }) async {
-    final sftp = _sftp ?? (throw NetworkError('SFTP not initialized'));
+    final sftp = _requireSftp;
     final file = await sftp.open(remotePath, mode: SftpFileOpenMode.read);
     try {
       // Try to get precise size; fall back to maxBytes if unavailable.
@@ -304,10 +380,16 @@ class FileBrowserNotifier
     if (_isDownloading) return;
     _isDownloading = true;
     final baseState = state.valueOrNull ?? const FileBrowserState();
+    // Clear any previous download error when starting a new download.
+    if (baseState.downloadError != null) {
+      state = AsyncData(baseState.copyWith(downloadError: null));
+    }
+    Object? caughtError;
     try {
-      await _downloadFileCore(remotePath, baseState);
+      await _downloadFileCore(remotePath, baseState.copyWith(downloadError: null));
     } catch (e) {
-      debugPrint('downloadFile error: $e');
+      AppLogger.instance.log('downloadFile error: $e');
+      caughtError = e;
     } finally {
       _isDownloading = false;
       final cur = state.valueOrNull;
@@ -317,8 +399,24 @@ class FileBrowserNotifier
       // ダウンロード終了後、接続が切れていたら AsyncError に遷移
       if (_channelManager == null) {
         state = AsyncError(NetworkError('SSH not connected'), StackTrace.current);
+      } else if (caughtError != null) {
+        // Connection is alive but download failed: surface the error in state.
+        final cur2 = state.valueOrNull;
+        if (cur2 != null) {
+          final msg = caughtError is AppError
+              ? caughtError.message
+              : caughtError.toString();
+          state = AsyncData(cur2.copyWith(downloadError: msg));
+        }
       }
     }
+  }
+
+  /// Clears the [FileBrowserState.downloadError] banner.
+  void clearDownloadError() {
+    final cur = state.valueOrNull;
+    if (cur == null || cur.downloadError == null) return;
+    state = AsyncData(cur.copyWith(downloadError: null));
   }
 
   Future<void> _downloadFileCore(
@@ -331,12 +429,12 @@ class FileBrowserNotifier
       throw NetworkError('Connection credentials not set');
     }
 
-    final sftp = _sftp ?? (throw NetworkError('SFTP not initialized'));
+    final sftp = _requireSftp;
     final filename = p.basename(remotePath);
     final generation = _downloadGeneration;
 
     // 一時ファイルにダウンロード
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = await _getTemporaryDirectory();
     final tempPath = p.join(tempDir.path, filename);
     final tempFile = File(tempPath);
     if (await tempFile.exists()) await tempFile.delete();
@@ -352,7 +450,7 @@ class FileBrowserNotifier
     // SSH 接続の確立・SFTP プロトコル処理・ファイル書き込みのすべてが
     // バックグラウンド Isolate で行われるため、メインアイソレートの
     // UI スレッドを一切ブロックしない。
-    final download = await DownloadIsolate.start(
+    final download = await _startDownloadIsolate(
       host: host,
       port: _port,
       username: username,
@@ -397,16 +495,10 @@ class FileBrowserNotifier
     }
 
     // MediaStore で Downloads に保存（Android）/ シェアシート（iOS）
-    String savedName;
-    try {
-      savedName = await DownloadHelper.saveToDownloads(
-        tempFilePath: tempPath,
-        fileName: filename,
-      );
-    } catch (e) {
-      debugPrint('saveToDownloads error: $e');
-      savedName = filename;
-    }
+    final savedName = await _saveToDownloads(
+      tempFilePath: tempPath,
+      fileName: filename,
+    );
 
     if (_downloadGeneration != generation) {
       throw NetworkError('Download cancelled');
@@ -431,58 +523,68 @@ class FileBrowserNotifier
   /// Uploads a local file to the current remote directory.
   /// Updates [FileBrowserState.uploadProgress] during transfer.
   Future<void> uploadFile(String localPath) async {
-    final sftp = _sftp ?? (throw NetworkError('SFTP not initialized'));
-    final current = state.valueOrNull ?? const FileBrowserState();
-    final fileName = p.basename(localPath);
-    final remotePath = '${current.currentPath}/$fileName';
-
-    state = AsyncData(current.copyWith(
-      uploadProgress: 0.0,
-      uploadCompleteFile: null,
-    ));
-
-    final localFile = File(localPath);
-    final fileSize = await localFile.length();
-
+    if (_isUploading) return;
+    _isUploading = true;
     try {
-      final remoteFile = await sftp.open(
-        remotePath,
-        mode: SftpFileOpenMode.write |
-            SftpFileOpenMode.create |
-            SftpFileOpenMode.truncate,
-      );
+      final sftp = _requireSftp;
+      final current = state.valueOrNull ?? const FileBrowserState();
+      final fileName = p.basename(localPath);
+      final remotePath = '${current.currentPath}/$fileName';
+
+      state = AsyncData(current.copyWith(
+        uploadProgress: 0.0,
+        uploadCompleteFile: null,
+      ));
+
+      final localFile = File(localPath);
+      final fileSize = await localFile.length();
+
       try {
-        final inputStream =
-            localFile.openRead().map((chunk) => Uint8List.fromList(chunk));
-        await remoteFile
-            .write(
-              inputStream,
-              onProgress: (bytesWritten) {
-                if (fileSize > 0) {
-                  final cur = state.valueOrNull ?? current;
-                  state = AsyncData(cur.copyWith(
-                    uploadProgress: bytesWritten / fileSize,
-                  ));
-                }
-              },
-            )
-            .done;
-      } finally {
-        await remoteFile.close();
+        final remoteFile = await sftp.open(
+          remotePath,
+          mode: SftpFileOpenMode.write |
+              SftpFileOpenMode.create |
+              SftpFileOpenMode.truncate,
+        );
+        try {
+          final inputStream =
+              localFile.openRead().map((chunk) => Uint8List.fromList(chunk));
+          await remoteFile
+              .write(
+                inputStream,
+                onProgress: (bytesWritten) {
+                  if (fileSize > 0) {
+                    final cur = state.valueOrNull ?? current;
+                    state = AsyncData(cur.copyWith(
+                      uploadProgress: bytesWritten / fileSize,
+                    ));
+                  }
+                },
+              )
+              .done;
+        } finally {
+          await remoteFile.close();
+        }
+
+        final cur = state.valueOrNull ?? current;
+        state = AsyncData(cur.copyWith(
+          uploadProgress: null,
+          uploadCompleteFile: fileName,
+        ));
+      } catch (e, st) {
+        final cur = state.valueOrNull ?? current;
+        state = AsyncData(cur.copyWith(uploadProgress: null));
+        _rethrowSftp(e, st, remotePath);
       }
-    } catch (e) {
-      final cur = state.valueOrNull ?? current;
-      state = AsyncData(cur.copyWith(uploadProgress: null));
-      rethrow;
+
+      await refresh();
+    } finally {
+      _isUploading = false;
+      // アップロード終了後、接続が切れていたら AsyncError に遷移
+      if (_channelManager == null) {
+        state = AsyncError(NetworkError('SSH not connected'), StackTrace.current);
+      }
     }
-
-    final cur = state.valueOrNull ?? current;
-    state = AsyncData(cur.copyWith(
-      uploadProgress: null,
-      uploadCompleteFile: fileName,
-    ));
-
-    await refresh();
   }
 
   /// Clears the upload complete notification.
@@ -494,19 +596,27 @@ class FileBrowserNotifier
 
   /// Deletes a remote file or empty directory, then refreshes the listing.
   Future<void> deleteFile(String remotePath, {bool isDirectory = false}) async {
-    final sftp = _sftp ?? (throw NetworkError('SFTP not initialized'));
-    if (isDirectory) {
-      await sftp.rmdir(remotePath);
-    } else {
-      await sftp.remove(remotePath);
+    final sftp = _requireSftp;
+    try {
+      if (isDirectory) {
+        await sftp.rmdir(remotePath);
+      } else {
+        await sftp.remove(remotePath);
+      }
+    } catch (e, st) {
+      _rethrowSftp(e, st, remotePath);
     }
     await refresh();
   }
 
   /// Renames/moves a remote file or directory, then refreshes the listing.
   Future<void> renameFile(String oldPath, String newPath) async {
-    final sftp = _sftp ?? (throw NetworkError('SFTP not initialized'));
-    await sftp.rename(oldPath, newPath);
+    final sftp = _requireSftp;
+    try {
+      await sftp.rename(oldPath, newPath);
+    } catch (e, st) {
+      _rethrowSftp(e, st, oldPath);
+    }
     await refresh();
   }
 }
@@ -516,24 +626,6 @@ final fileBrowserProvider = AsyncNotifierProvider.family<FileBrowserNotifier,
   FileBrowserNotifier.new,
 );
 
-// ---------------------------------------------------------------------------
-// Shell escape utility (also used by path_bar_widget)
-// ---------------------------------------------------------------------------
-
-/// Wraps [path] in single quotes and escapes any embedded single quotes.
-/// Safe against all shell metacharacters (spaces, $, ;, |, etc.).
-String shellEscapePath(String path) => shellQuote(path);
-
-/// Human-readable file size (e.g. "1.2 MB").
-String humanReadableSize(int? bytes) {
-  if (bytes == null) return '';
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  if (bytes < 1024 * 1024 * 1024) {
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-  }
-  return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
-}
 
 /// Unix permission string from [SftpFileMode], e.g. "rwxr-xr-x".
 String permissionString(SftpFileMode? mode) {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:xterm/xterm.dart';
 
 class TerminalSelectionToolbar extends StatelessWidget {
@@ -9,12 +10,16 @@ class TerminalSelectionToolbar extends StatelessWidget {
     required this.controller,
     required this.onPaste,
     required this.onDismiss,
+    this.detectedUrl,
   });
 
   final Terminal terminal;
   final TerminalController controller;
   final void Function(String text) onPaste;
   final VoidCallback onDismiss;
+
+  /// 選択範囲周辺で検出された URL。null でなければ「リンクを開く」ボタンを表示。
+  final String? detectedUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +33,12 @@ class TerminalSelectionToolbar extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (detectedUrl != null)
+              _ToolbarButton(
+                icon: Icons.open_in_browser,
+                label: 'リンクを開く',
+                onPressed: () => _handleOpenUrl(context),
+              ),
             if (hasSelection)
               _ToolbarButton(
                 icon: Icons.copy,
@@ -53,6 +64,17 @@ class TerminalSelectionToolbar extends StatelessWidget {
     );
   }
 
+  Future<void> _handleOpenUrl(BuildContext context) async {
+    final url = detectedUrl;
+    if (url == null) return;
+    controller.clearSelection();
+    onDismiss();
+    final uri = Uri.tryParse(url);
+    if (uri != null) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
   void _handleCopy(BuildContext context) {
     final selection = controller.selection;
     if (selection == null) return;
@@ -70,8 +92,9 @@ class TerminalSelectionToolbar extends StatelessWidget {
 
   Future<void> _handlePaste(BuildContext context) async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (data?.text != null && data!.text!.isNotEmpty) {
-      onPaste(data.text!);
+    final text = data?.text;
+    if (text != null && text.isNotEmpty) {
+      onPaste(text);
     }
     controller.clearSelection();
     onDismiss();

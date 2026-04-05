@@ -1,66 +1,17 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' show sha256;
-import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+
+import '../platform/platform_storage.dart';
 
 class KnownHostsStore {
   KnownHostsStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _store = PlatformStorage(storage);
 
-  final FlutterSecureStorage _storage;
+  final PlatformStorage _store;
   static const _prefix = 'known_host_';
-
-  // --- macOS file-based fallback ---
-
-  static Directory? _cacheDir;
-
-  Future<File> _fileFor(String key) async {
-    if (_cacheDir == null) {
-      final dir = await getApplicationSupportDirectory();
-      _cacheDir = Directory(p.join(dir.path, 'secure_kv'));
-      await _cacheDir!.create(recursive: true);
-    }
-    final safe = key.replaceAll(RegExp(r'[^\w\-.]'), '_');
-    return File(p.join(_cacheDir!.path, safe));
-  }
-
-  Future<void> _write(String key, String value) async {
-    if (Platform.isMacOS) {
-      final f = await _fileFor(key);
-      await f.writeAsString(base64Encode(utf8.encode(value)), flush: true);
-    } else {
-      await _storage.write(key: key, value: value);
-    }
-  }
-
-  Future<String?> _read(String key) async {
-    if (Platform.isMacOS) {
-      final f = await _fileFor(key);
-      if (!await f.exists()) return null;
-      try {
-        return utf8.decode(base64Decode(await f.readAsString()));
-      } catch (e) {
-        debugPrint('[KnownHostsStore] read error: $e');
-        return null;
-      }
-    } else {
-      return _storage.read(key: key);
-    }
-  }
-
-  Future<void> _delete(String key) async {
-    if (Platform.isMacOS) {
-      final f = await _fileFor(key);
-      if (await f.exists()) await f.delete();
-    } else {
-      await _storage.delete(key: key);
-    }
-  }
 
   // --- public API ---
 
@@ -69,21 +20,27 @@ class KnownHostsStore {
     return base64Encode(digest.bytes);
   }
 
-  String _storageKey(String host, int port) => '$_prefix${host}_$port';
+  String _storageKey(String host, int port) => '$_prefix$host:$port';
 
   Future<String?> getStoredFingerprint(String host, int port) =>
-      _read(_storageKey(host, port));
+      _store.read(_storageKey(host, port));
 
   Future<void> saveFingerprint(String host, int port, String fingerprint) =>
-      _write(_storageKey(host, port), fingerprint);
+      _store.write(_storageKey(host, port), fingerprint);
 
   Future<void> removeFingerprint(String host, int port) =>
-      _delete(_storageKey(host, port));
+      _store.delete(_storageKey(host, port));
 
-  Future<bool?> verify(String host, int port, Uint8List hostKey) async {
+  /// Returns (matched, storedFingerprint):
+  ///   matched == null  → no stored fingerprint (first connection)
+  ///   matched == true  → fingerprint matches
+  ///   matched == false → fingerprint mismatch (potential MITM)
+  /// storedFingerprint is non-null when a fingerprint was previously stored.
+  Future<(bool?, String?)> verify(
+      String host, int port, Uint8List hostKey) async {
     final fingerprint = computeFingerprint(hostKey);
     final stored = await getStoredFingerprint(host, port);
-    if (stored == null) return null;
-    return stored == fingerprint;
+    if (stored == null) return (null, null);
+    return (stored == fingerprint, stored);
   }
 }
