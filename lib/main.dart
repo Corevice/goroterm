@@ -14,13 +14,27 @@ import 'features/connections/connection_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  FlutterForegroundTask.initCommunicationPort();
-  SshForegroundService.init();
-  await NotificationService.instance.init();
 
-  final dbFolder = await getApplicationDocumentsDirectory();
-  final file = File(p.join(dbFolder.path, 'terminal_ssh.db'));
-  final db = AppDatabase(NativeDatabase(file));
+  try {
+    if (Platform.isAndroid) {
+      FlutterForegroundTask.initCommunicationPort();
+    }
+    SshForegroundService.init();
+  } catch (_) {}
+
+  try {
+    await NotificationService.instance.init();
+  } catch (_) {}
+
+  late AppDatabase db;
+  try {
+    final dbFolder = await getApplicationDocumentsDirectory();
+    final file = File(p.join(dbFolder.path, 'terminal_ssh.db'));
+    db = AppDatabase(NativeDatabase(file));
+  } catch (e) {
+    // DB 初期化失敗時はインメモリDB
+    db = AppDatabase(NativeDatabase.memory());
+  }
 
   runApp(
     ProviderScope(

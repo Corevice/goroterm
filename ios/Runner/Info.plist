@@ -45,5 +45,15 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Required for SSH connections to local network devices</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ssh._tcp</string>
+	</array>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Voice input for terminal commands</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access for voice input</string>
 </dict>
 </plist>
