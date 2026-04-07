@@ -399,6 +399,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             onClose: (id) => ref
                 .read(sessionManagerProvider.notifier)
                 .removeSession(id),
+            onReorder: (oldIndex, newIndex) => ref
+                .read(sessionManagerProvider.notifier)
+                .reorderSessions(oldIndex, newIndex),
           ),
         ),
       ),
@@ -450,12 +453,14 @@ class _TabStrip extends StatefulWidget {
     required this.activeSessionId,
     required this.onSelect,
     required this.onClose,
+    required this.onReorder,
   });
 
   final List<TerminalSession> sessions;
   final String activeSessionId;
   final ValueChanged<String> onSelect;
   final ValueChanged<String> onClose;
+  final void Function(int oldIndex, int newIndex) onReorder;
 
   @override
   State<_TabStrip> createState() => _TabStripState();
@@ -501,9 +506,19 @@ class _TabStripState extends State<_TabStrip> {
 
     return SizedBox(
       height: 36,
-      child: ListView.builder(
-        controller: _scrollController,
+      child: ReorderableListView.builder(
+        scrollController: _scrollController,
         scrollDirection: Axis.horizontal,
+        buildDefaultDragHandles: false,
+        onReorder: widget.onReorder,
+        proxyDecorator: (child, index, animation) {
+          return Material(
+            elevation: 4,
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
+            child: child,
+          );
+        },
         itemCount: widget.sessions.length,
         itemBuilder: (context, index) {
           final session = widget.sessions[index];
@@ -512,10 +527,13 @@ class _TabStripState extends State<_TabStrip> {
             session.sessionId,
             () => GlobalKey(),
           );
-          return InkWell(
-            key: tabKey,
-            onTap: () => widget.onSelect(session.sessionId),
-            child: Container(
+          return ReorderableDragStartListener(
+            key: ValueKey(session.sessionId),
+            index: index,
+            child: InkWell(
+              key: tabKey,
+              onTap: () => widget.onSelect(session.sessionId),
+              child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
                 color: isActive ? Colors.grey[800] : Colors.grey[900],
@@ -545,6 +563,7 @@ class _TabStripState extends State<_TabStrip> {
                   ),
                 ],
               ),
+            ),
             ),
           );
         },

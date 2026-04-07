@@ -28,5 +28,9 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Voice input for terminal commands</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access for voice input</string>
 </dict>
 </plist>

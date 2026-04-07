@@ -84,6 +84,15 @@ class SessionManagerNotifier extends Notifier<SessionManagerState> {
     }
   }
 
+  /// Reorders sessions by moving the item at [oldIndex] to [newIndex].
+  void reorderSessions(int oldIndex, int newIndex) {
+    if (newIndex > oldIndex) newIndex--;
+    final updated = List<TerminalSession>.from(state.sessions);
+    final item = updated.removeAt(oldIndex);
+    updated.insert(newIndex, item);
+    state = state.copyWith(sessions: updated);
+  }
+
   /// Switches the active (visible) tab.
   void setActiveSession(String sessionId) {
     state = state.copyWith(activeSessionId: sessionId);
