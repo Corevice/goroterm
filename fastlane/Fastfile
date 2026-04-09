@@ -1,0 +1,34 @@
+default_platform(:ios)
+
+platform :android do
+  desc "Upload AAB to Google Play Internal Testing"
+  lane :deploy do
+    upload_to_play_store(
+      track: "internal",
+      aab: "../build/app/outputs/bundle/release/app-release.aab",
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+end
+
+platform :ios do
+  desc "Upload IPA to TestFlight"
+  lane :deploy do
+    api_key = app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      key_content: ENV["APP_STORE_CONNECT_API_KEY_P8"],
+      is_key_content_base64: false,
+      in_house: false,
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      skip_waiting_for_build_processing: true,
+      ipa: "../build/ios/ipa/GoroTerm.ipa",
+    )
+  end
+end

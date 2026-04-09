@@ -45,3 +45,15 @@ app.*.map.json
 /android/app/release
 
 tmp/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# CI/CD secrets
+*.p12
+*.mobileprovision
+*.p8
+google-play-service-account.json
