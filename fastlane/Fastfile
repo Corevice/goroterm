@@ -5,7 +5,7 @@ platform :android do
   lane :deploy do
     upload_to_play_store(
       track: "internal",
-      aab: "../build/app/outputs/bundle/release/app-release.aab",
+      aab: "build/app/outputs/bundle/release/app-release.aab",
       skip_upload_metadata: true,
       skip_upload_changelogs: true,
       skip_upload_images: true,
@@ -28,7 +28,7 @@ platform :ios do
     upload_to_testflight(
       api_key: api_key,
       skip_waiting_for_build_processing: true,
-      ipa: "../build/ios/ipa/GoroTerm.ipa",
+      ipa: "build/ios/ipa/GoroTerm.ipa",
     )
   end
 end
