@@ -43,6 +43,25 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
         run: flutter build appbundle --release --build-number="$BUILD_NUMBER"
 
+      - name: Build APK
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: flutter build apk --release --build-number="$BUILD_NUMBER"
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          retention-days: 30
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
