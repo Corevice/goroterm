@@ -13,5 +13,20 @@ void main() {
       parser.write('\x1b[8;24;80t');
       verify(parser.handler.resize(80, 24));
     });
+
+    test('consumes DCS payload and parses following CSI (ST terminator)', () {
+      final handler = MockEscapeHandler();
+      final parser = EscapeParser(handler);
+      // DCS = 2026 h ST (Synchronized Output Mode begin), then CSI H
+      parser.write('\x1bP=2026h\x1b\\\x1b[H');
+      verify(handler.setCursor(0, 0));
+    });
+
+    test('consumes DCS payload and parses following CSI (BEL terminator)', () {
+      final handler = MockEscapeHandler();
+      final parser = EscapeParser(handler);
+      parser.write('\x1bPfoo\x07\x1b[H');
+      verify(handler.setCursor(0, 0));
+    });
   });
 }

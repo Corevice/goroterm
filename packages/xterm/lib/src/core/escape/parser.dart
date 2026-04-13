@@ -100,7 +100,7 @@ class EscapeParser {
     'E'.charCode: _escHandleNextLine,
     'H'.charCode: _escHandleTabSet,
     'M'.charCode: _escHandleReverseIndex,
-    // 'P'.charCode: _unsupportedHandler, // Sixel
+    'P'.charCode: _escHandleDCS,
     // 'c'.charCode: _unsupportedHandler,
     // '#'.charCode: _unsupportedHandler,
     '('.charCode: _escHandleDesignateCharset0, //  SCS - G0
@@ -1079,6 +1079,34 @@ class EscapeParser {
     handler.unknownOSC(_osc[0], _osc.sublist(1));
 
     return true;
+  }
+
+  /// `ESC P ... ST` Device Control String (DCS).
+  ///
+  /// Consumes the payload up to ST (ESC \) or BEL and discards it.
+  /// This prevents DCS payloads (e.g. Synchronized Output Mode
+  /// `ESC P = 2026 h` used by INK/Claude Code) from corrupting the
+  /// parser state when written as plain text.
+  bool _escHandleDCS() {
+    while (true) {
+      if (_queue.isEmpty) {
+        return false;
+      }
+
+      final char = _queue.consume();
+
+      if (char == Ascii.BEL) {
+        return true;
+      }
+
+      if (char == Ascii.ESC) {
+        if (_queue.isEmpty) {
+          return false;
+        }
+        _queue.consume();
+        return true;
+      }
+    }
   }
 
   final _osc = <String>[];
