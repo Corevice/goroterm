@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:xterm/src/core/color.dart';
 import 'package:xterm/src/core/mouse/mode.dart';
 import 'package:xterm/src/core/escape/handler.dart';
@@ -1071,6 +1073,22 @@ class EscapeParser {
           return true;
         case '2':
           handler.setTitle(pt);
+          return true;
+        case '52':
+          // OSC 52: set/query clipboard. Format: 52;<selection>;<base64>
+          // selection: c=clipboard, p=primary, s=selection, etc. We treat
+          // any selection as clipboard. A '?' payload is a query — ignore.
+          if (_osc.length >= 3) {
+            final payload = _osc[2];
+            if (payload != '?' && payload.isNotEmpty) {
+              try {
+                final decoded = utf8.decode(base64.decode(payload));
+                handler.setClipboardData(decoded);
+              } catch (_) {
+                // Ignore malformed base64 / non-UTF-8 payloads.
+              }
+            }
+          }
           return true;
       }
     }

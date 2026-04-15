@@ -211,5 +211,9 @@ abstract class EscapeHandler {
 
   void setIconName(String name);
 
+  /// OSC 52 — set clipboard contents. [text] is the already-decoded
+  /// plain text (UTF-8) from the base64 payload.
+  void setClipboardData(String text);
+
   void unknownOSC(String code, List<String> args);
 }

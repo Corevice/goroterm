@@ -42,6 +42,10 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   /// the icon of the window. [icon] is the name of the icon.
   void Function(String icon)? onIconChange;
 
+  /// Function that is called when the program writes to the system clipboard
+  /// via OSC 52. [text] is the decoded plain text payload.
+  void Function(String text)? onClipboardWrite;
+
   /// Function that is called when the terminal emits data to the underlying
   /// program. This is typically caused by user inputs from [textInput],
   /// [keyInput], [mouseInput], or [paste].
@@ -75,6 +79,7 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
     this.onBell,
     this.onTitleChange,
     this.onIconChange,
+    this.onClipboardWrite,
     this.onOutput,
     this.onResize,
     this.platform = TerminalTargetPlatform.unknown,
@@ -897,6 +902,11 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   @override
   void setIconName(String name) {
     onIconChange?.call(name);
+  }
+
+  @override
+  void setClipboardData(String text) {
+    onClipboardWrite?.call(text);
   }
 
   @override

@@ -28,5 +28,21 @@ void main() {
       parser.write('\x1bPfoo\x07\x1b[H');
       verify(handler.setCursor(0, 0));
     });
+
+    test('OSC 52 decodes base64 clipboard payload and calls setClipboardData',
+        () {
+      final handler = MockEscapeHandler();
+      final parser = EscapeParser(handler);
+      // "hello" base64 -> aGVsbG8=
+      parser.write('\x1b]52;c;aGVsbG8=\x07');
+      verify(handler.setClipboardData('hello'));
+    });
+
+    test('OSC 52 query payload (?) is ignored', () {
+      final handler = MockEscapeHandler();
+      final parser = EscapeParser(handler);
+      parser.write('\x1b]52;c;?\x07');
+      verifyNever(handler.setClipboardData(any));
+    });
   });
 }
