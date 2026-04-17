@@ -109,14 +109,14 @@ class TerminalPainter {
         return;
       case TerminalCursorType.underline:
         return canvas.drawLine(
-          Offset(offset.dx, _cellSize.height - 1),
-          Offset(offset.dx + _cellSize.width, _cellSize.height - 1),
+          Offset(offset.dx, offset.dy + _cellSize.height - 1),
+          Offset(offset.dx + _cellSize.width, offset.dy + _cellSize.height - 1),
           paint,
         );
       case TerminalCursorType.verticalBar:
         return canvas.drawLine(
-          Offset(offset.dx, 0),
-          Offset(offset.dx, _cellSize.height),
+          Offset(offset.dx, offset.dy),
+          Offset(offset.dx, offset.dy + _cellSize.height),
           paint,
         );
     }
@@ -172,14 +172,35 @@ class TerminalPainter {
   @pragma('vm:prefer-inline')
   void paintCellForeground(Canvas canvas, Offset offset, CellData cellData) {
     final charCode = cellData.content & CellContent.codepointMask;
+    final cellFlags = cellData.flags;
+    final hasUnderline = cellFlags & CellFlags.underline != 0;
+
+    // アンダーラインは Canvas に直接描画する。
+    // Flutter の TextDecoration.underline はセルごとに独立した Paragraph で
+    // 描画されるため、隣接セルの下線がつながらず `_` のように見える問題がある。
+    // Canvas.drawLine で描画することで連続した水平線になる。
+    if (hasUnderline) {
+      final underlineColor = cellFlags & CellFlags.inverse == 0
+          ? resolveForegroundColor(cellData.foreground)
+          : resolveBackgroundColor(cellData.background);
+      final paint = Paint()
+        ..color = cellData.flags & CellFlags.faint != 0
+            ? underlineColor.withOpacity(0.5)
+            : underlineColor
+        ..strokeWidth = 1;
+      final doubleWidth =
+          cellData.content >> CellContent.widthShift == 2;
+      final w = _cellSize.width * (doubleWidth ? 2 : 1);
+      final y = offset.dy + _cellSize.height - 1;
+      canvas.drawLine(Offset(offset.dx, y), Offset(offset.dx + w, y), paint);
+    }
+
     if (charCode == 0) return;
 
     final cacheKey = cellData.getHash() ^ _textScaler.hashCode;
     var paragraph = _paragraphCache.getLayoutFromCache(cacheKey);
 
     if (paragraph == null) {
-      final cellFlags = cellData.flags;
-
       var color = cellFlags & CellFlags.inverse == 0
           ? resolveForegroundColor(cellData.foreground)
           : resolveBackgroundColor(cellData.background);
@@ -188,23 +209,15 @@ class TerminalPainter {
         color = color.withOpacity(0.5);
       }
 
+      // underline は Canvas で描画するため TextDecoration には渡さない
       final style = _textStyle.toTextStyle(
         color: color,
         bold: cellFlags & CellFlags.bold != 0,
         italic: cellFlags & CellFlags.italic != 0,
-        underline: cellFlags & CellFlags.underline != 0,
+        underline: false,
       );
 
-      // Flutter does not draw an underline below a space which is not between
-      // other regular characters. As only single characters are drawn, this
-      // will never produce an underline below a space in the terminal. As a
-      // workaround the regular space CodePoint 0x20 is replaced with
-      // the CodePoint 0xA0. This is a non breaking space and a underline can be
-      // drawn below it.
-      var char = String.fromCharCode(charCode);
-      if (cellFlags & CellFlags.underline != 0 && charCode == 0x20) {
-        char = String.fromCharCode(0xA0);
-      }
+      final char = String.fromCharCode(charCode);
 
       paragraph = _paragraphCache.performAndCacheLayout(
         char,

@@ -234,6 +234,104 @@ void main() {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // reorderSessions() — ReorderableListView drag reorder
+  // -------------------------------------------------------------------------
+
+  group('reorderSessions()', () {
+    // Helper: build a container with N plain sessions and return their IDs.
+    List<String> _addSessions(
+        SessionManagerNotifier notifier, int count) {
+      return [
+        for (var i = 1; i <= count; i++)
+          notifier.addSession(connectionId: i, label: 'Server $i'),
+      ];
+    }
+
+    test('moves first item to last position (forward move)', () {
+      final container = makeContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(sessionManagerProvider.notifier);
+      final ids = _addSessions(notifier, 3); // [A, B, C]
+
+      // ReorderableListView passes newIndex=3 when dragging index 0 to the end.
+      notifier.reorderSessions(0, 3);
+
+      final sessions = container.read(sessionManagerProvider).sessions;
+      expect(sessions.map((s) => s.sessionId).toList(),
+          [ids[1], ids[2], ids[0]],
+          reason: 'A moved to end → [B, C, A]');
+    });
+
+    test('moves last item to first position (backward move)', () {
+      final container = makeContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(sessionManagerProvider.notifier);
+      final ids = _addSessions(notifier, 3); // [A, B, C]
+
+      notifier.reorderSessions(2, 0);
+
+      final sessions = container.read(sessionManagerProvider).sessions;
+      expect(sessions.map((s) => s.sessionId).toList(),
+          [ids[2], ids[0], ids[1]],
+          reason: 'C moved to front → [C, A, B]');
+    });
+
+    test('moves middle item to first position', () {
+      final container = makeContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(sessionManagerProvider.notifier);
+      final ids = _addSessions(notifier, 3); // [A, B, C]
+
+      notifier.reorderSessions(1, 0);
+
+      final sessions = container.read(sessionManagerProvider).sessions;
+      expect(sessions.map((s) => s.sessionId).toList(),
+          [ids[1], ids[0], ids[2]],
+          reason: 'B moved to front → [B, A, C]');
+    });
+
+    test('moves first item to middle position (forward move)', () {
+      final container = makeContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(sessionManagerProvider.notifier);
+      final ids = _addSessions(notifier, 3); // [A, B, C]
+
+      // newIndex=2 for forward move from index 0 to between B and C.
+      notifier.reorderSessions(0, 2);
+
+      final sessions = container.read(sessionManagerProvider).sessions;
+      expect(sessions.map((s) => s.sessionId).toList(),
+          [ids[1], ids[0], ids[2]],
+          reason: 'A moved after B → [B, A, C]');
+    });
+
+    test('does not change activeSessionId after reorder', () {
+      final container = makeContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(sessionManagerProvider.notifier);
+      final ids = _addSessions(notifier, 3);
+      // Last added is active.
+      expect(container.read(sessionManagerProvider).activeSessionId, ids[2]);
+
+      notifier.reorderSessions(0, 3); // move first to last
+
+      expect(container.read(sessionManagerProvider).activeSessionId, ids[2],
+          reason: 'reorder must not change which tab is active');
+    });
+
+    test('session count is unchanged after reorder', () {
+      final container = makeContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(sessionManagerProvider.notifier);
+      _addSessions(notifier, 4);
+
+      notifier.reorderSessions(1, 3);
+
+      expect(container.read(sessionManagerProvider).sessions.length, 4);
+    });
+  });
+
   group('tmux session helpers', () {
     test('addTmuxSession creates a session with tmuxSessionName', () {
       final container = makeContainer();

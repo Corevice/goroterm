@@ -330,6 +330,45 @@ Mounted on          1B-blocks        Used
       expect(info.disks, isEmpty);
     });
 
+    // -------------------------------------------------------------------------
+    // df -B1: mount point with spaces
+    //
+    // Linux mount points can contain spaces (e.g. "/home/my drive").
+    // The parser must derive size/used/percent by counting from the right
+    // (always numeric) and reconstruct the mount point from everything left,
+    // mirroring the df -k mount-point handling.
+    // -------------------------------------------------------------------------
+    test('parses df -B1 mount point that contains spaces', () {
+      const output = '''
+===DISK===
+Mounted on          1B-blocks        Used       Avail Use%
+/home/my drive  107374182400 53687091200 48318382080  50%
+===END===
+''';
+      final info = ServerInfoParser.parse(output);
+      expect(info.disks.length, 1);
+      expect(info.disks[0].mountPoint, '/home/my drive');
+      expect(info.disks[0].size, 107374182400);
+      expect(info.disks[0].used, 53687091200);
+      expect(info.disks[0].usedPercent, 50);
+    });
+
+    test('parses df -B1 mount point with multiple spaces', () {
+      // Mount point with two words after the initial slash.
+      const output = '''
+===DISK===
+Mounted on          1B-blocks        Used       Avail Use%
+/mnt/data disk  53687091200 10737418240 42949672960  20%
+===END===
+''';
+      final info = ServerInfoParser.parse(output);
+      expect(info.disks.length, 1);
+      expect(info.disks[0].mountPoint, '/mnt/data disk');
+      expect(info.disks[0].size, 53687091200);
+      expect(info.disks[0].used, 10737418240);
+      expect(info.disks[0].usedPercent, 20);
+    });
+
     test('skips ps aux lines that have fewer than 11 columns', () {
       // _parseProcesses requires parts.length >= 11. A truncated ps line
       // (only 5 tokens) must be silently dropped.

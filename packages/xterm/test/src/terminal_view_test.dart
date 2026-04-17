@@ -100,7 +100,8 @@ void main() {
       await tester.pump(Duration(seconds: 1));
 
       binding.testTextInput.enterText('ls -al');
-      await binding.idle();
+      // Future.delayed(20ms) in custom_text_edit.dart must fire before assert
+      await tester.pump(const Duration(milliseconds: 50));
 
       expect(terminalOutput.join(), 'ls -al');
     });

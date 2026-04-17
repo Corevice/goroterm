@@ -9,6 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:xterm/xterm.dart';
 
+import 'package:dartssh2/dartssh2.dart' show SSHClient;
+import 'package:terminal_ssh_app/core/error/app_error.dart';
 import 'package:terminal_ssh_app/core/network/connectivity_monitor.dart';
 import 'package:terminal_ssh_app/core/ssh/connection_config.dart';
 import 'package:terminal_ssh_app/core/ssh/known_hosts_store.dart';
@@ -168,6 +170,31 @@ class _TrackingFailFastSshClientService extends SshClientService {
   }
 }
 
+/// SSH service whose disconnect() throws. Used to verify that
+/// _cleanupConnections() swallows the exception rather than propagating it.
+class _ThrowingDisconnectSshClientService extends SshClientService {
+  bool disconnectCalled = false;
+
+  _ThrowingDisconnectSshClientService()
+      : super(
+          knownHostsStore: KnownHostsStore(
+            storage: _MockFlutterSecureStorage(),
+          ),
+          socketFactory: (host, port, {timeout}) async {
+            throw Exception('test: connection refused');
+          },
+        );
+
+  @override
+  bool get isConnected => false;
+
+  @override
+  void disconnect() {
+    disconnectCalled = true;
+    throw Exception('test: disconnect() threw');
+  }
+}
+
 /// Fake SSH service that always reports disconnected — used to test early exit.
 class _FakeDisconnectedSshClientService extends SshClientService {
   _FakeDisconnectedSshClientService()
@@ -194,7 +221,7 @@ class _FakeDisconnectedSshClientService extends SshClientService {
 /// Fake SSH service that blocks on its second keepAlive() call until a
 /// provided Completer is completed. Used to simulate the race where
 /// _sshService is replaced while probe 2 is awaiting — testing the
-/// identity guard at line 550 after probe 2 returns.
+/// identity guard after probe 2 returns in checkConnection().
 class _BlockingProbe2Service extends SshClientService {
   _BlockingProbe2Service()
       : super(
@@ -254,6 +281,37 @@ class _BlockingFirstCallService extends SshClientService {
     }
     return false;
   }
+
+  @override
+  void disconnect() {}
+}
+
+/// Fake SSH service that throws a NetworkError directly from connect().
+/// Overrides connect() to bypass SshClientService's error-wrapping catch blocks,
+/// so the thrown NetworkError reaches terminal_connection_provider unchanged.
+/// Used to verify that AppError.message (not toString()) is stored in errorMessage.
+class _NetworkErrorSshClientService extends SshClientService {
+  _NetworkErrorSshClientService()
+      : super(
+          knownHostsStore: KnownHostsStore(
+            storage: _MockFlutterSecureStorage(),
+          ),
+        );
+
+  @override
+  Future<SSHClient> connect({
+    required ConnectionConfig config,
+    String? password,
+    String? privateKeyPem,
+    String? passphrase,
+    Future<bool> Function(String)? onUnknownHostKey,
+    Future<bool> Function(String, String)? onHostKeyMismatch,
+  }) async {
+    throw const NetworkError('Host unreachable');
+  }
+
+  @override
+  bool get isConnected => false;
 
   @override
   void disconnect() {}
@@ -1392,7 +1450,7 @@ void main() {
   // _flushOutput() — batched terminal output behaviour
   //
   // SSH stdout chunks are accumulated in _outputBuffer and flushed in at most
-  // 16 KB chunks so the UI thread can render between large outputs (e.g.
+  // 64 KB chunks so the UI thread can render between large outputs (e.g.
   // Claude Code on tmux).  During a resize-guard window, chunking is disabled
   // to prevent tmux redraw corruption.
   // -------------------------------------------------------------------------
@@ -1418,38 +1476,38 @@ void main() {
       expect(remaining, isEmpty);
     });
 
-    // Data <= 16 KB → written all at once, buffer cleared.
-    test('small data (<=16 KB) is written all at once', () {
-      final data = 'A' * (16 * 1024); // exactly 16 KB
+    // Data <= 64 KB → written all at once, buffer cleared.
+    test('small data (<=64 KB) is written all at once', () {
+      final data = 'A' * (64 * 1024); // exactly 64 KB
       final remaining = notifier.flushOutputForTesting(terminal, data);
       expect(remaining, isEmpty,
           reason: 'buffer must be empty after flushing small data');
     });
 
-    // Data one byte over 16 KB → first chunk written, rest stays in buffer.
-    test('large data (>16 KB) splits into 16 KB chunk + remainder', () {
-      const chunkSize = 16 * 1024;
-      final data = 'B' * (chunkSize + 500); // 16 KB + 500 bytes
+    // Data one byte over 64 KB → first chunk written, rest stays in buffer.
+    test('large data (>64 KB) splits into 64 KB chunk + remainder', () {
+      const chunkSize = 64 * 1024;
+      final data = 'B' * (chunkSize + 500); // 64 KB + 500 bytes
       final remaining = notifier.flushOutputForTesting(terminal, data);
       expect(remaining.length, 500,
-          reason: 'exactly 500 bytes should remain after first 16 KB chunk');
+          reason: 'exactly 500 bytes should remain after first 64 KB chunk');
     });
 
     // Much larger data → first chunk written, large remainder in buffer.
-    test('very large data (100 KB) leaves 84 KB remainder after first flush',
+    test('very large data (100 KB) leaves 36 KB remainder after first flush',
         () {
-      const chunkSize = 16 * 1024;
+      const chunkSize = 64 * 1024;
       const totalSize = 100 * 1024;
       final data = 'C' * totalSize;
       final remaining = notifier.flushOutputForTesting(terminal, data);
       expect(remaining.length, totalSize - chunkSize,
-          reason: 'first 16 KB written, remaining ${totalSize - chunkSize} in buffer');
+          reason: 'first 64 KB written, remaining ${totalSize - chunkSize} in buffer');
     });
 
     // Resize guard active → even large data is written all at once (no split).
     test('resize guard suppresses chunking for large data', () {
-      const chunkSize = 16 * 1024;
-      final data = 'D' * (chunkSize + 1000); // > 16 KB
+      const chunkSize = 64 * 1024;
+      final data = 'D' * (chunkSize + 1000); // > 64 KB
 
       notifier.setResizeGuardActiveForTesting(true);
       final remaining = notifier.flushOutputForTesting(terminal, data);
@@ -1460,7 +1518,7 @@ void main() {
 
     // Resize guard inactive → normal chunking applies.
     test('resize guard false restores normal chunking', () {
-      const chunkSize = 16 * 1024;
+      const chunkSize = 64 * 1024;
       final data = 'E' * (chunkSize + 200);
 
       notifier.setResizeGuardActiveForTesting(false);
@@ -1468,6 +1526,41 @@ void main() {
 
       expect(remaining.length, 200,
           reason: '200 bytes should remain after first chunk when guard is off');
+    });
+
+    // Alt buffer active → chunking disabled even for large data.
+    //
+    // TUI アプリ（Claude Code プランモード等）は alt buffer を使用する。
+    // alt buffer 使用中にチャンク分割すると ANSI シーケンスが途中で切れて
+    // 表示が崩れるため、resize guard と同様に分割を抑制する必要がある。
+    test('alt buffer suppresses chunking for large data', () {
+      const chunkSize = 64 * 1024;
+      final data = 'F' * (chunkSize + 1000); // > 64 KB
+
+      // ESC [ ? 1049 h を送ると alt buffer に切り替わる。
+      // Terminal.useAltBuffer() を直接呼び出してテスト用に切り替える。
+      terminal.useAltBuffer();
+      expect(terminal.isUsingAltBuffer, isTrue, reason: 'precondition');
+
+      final remaining = notifier.flushOutputForTesting(terminal, data);
+
+      expect(remaining, isEmpty,
+          reason: 'alt buffer must disable chunking — all data written at once');
+    });
+
+    // Alt buffer inactive → normal chunking applies.
+    test('alt buffer inactive restores normal chunking', () {
+      const chunkSize = 64 * 1024;
+      final data = 'G' * (chunkSize + 300);
+
+      // Ensure we are on the main buffer (default).
+      terminal.useMainBuffer();
+      expect(terminal.isUsingAltBuffer, isFalse, reason: 'precondition');
+
+      final remaining = notifier.flushOutputForTesting(terminal, data);
+
+      expect(remaining.length, 300,
+          reason: '300 bytes should remain after first chunk on main buffer');
     });
   });
 
@@ -1925,6 +2018,83 @@ void main() {
   });
 
   // -------------------------------------------------------------------------
+  // _cleanupConnections() — idle counter reset
+  //
+  // _cleanupConnections() delegates idle-counter teardown to resetIdleCounter().
+  // Verify that disconnect/reconnect paths (which call _cleanupConnections())
+  // cancel any pending idle timer and discard accumulated byte counts.
+  // -------------------------------------------------------------------------
+
+  group('_cleanupConnections() resets idle counter', () {
+    late ProviderContainer container;
+    late TerminalConnectionNotifier notifier;
+    late _FakeSshClientService fakeService;
+
+    setUp(() {
+      container = makeContainer();
+      notifier = container.read(
+        terminalConnectionProvider('cleanup-idle-test').notifier,
+      );
+      fakeService = _FakeSshClientService();
+      TerminalConnectionNotifier.setAppInBackground(true);
+    });
+
+    tearDown(() {
+      container.dispose();
+      TerminalConnectionNotifier.setAppInBackground(false);
+    });
+
+    test('triggerOnDisconnected cancels the idle timer', () {
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+      );
+      // Accumulate enough bytes to arm the idle timer.
+      notifier.addOutputBytesForTesting(4096);
+      expect(
+        notifier.isIdleTimerActiveForTesting,
+        isTrue,
+        reason: 'precondition: idle timer must be active before disconnect',
+      );
+
+      notifier.triggerOnDisconnectedForTesting();
+
+      expect(
+        notifier.isIdleTimerActiveForTesting,
+        isFalse,
+        reason: '_cleanupConnections() must cancel the idle timer via resetIdleCounter()',
+      );
+    });
+
+    test('triggerOnDisconnected discards accumulated byte count', () {
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+      );
+      // Accumulate 3000 bytes (below threshold — no timer yet).
+      notifier.addOutputBytesForTesting(3000);
+
+      notifier.triggerOnDisconnectedForTesting();
+
+      // After cleanup, byte counter must be 0. Adding 2000 more bytes stays
+      // below threshold — no idle timer should be armed.
+      notifier.addOutputBytesForTesting(2000);
+      expect(
+        notifier.isIdleTimerActiveForTesting,
+        isFalse,
+        reason: 'byte counter must be reset by _cleanupConnections(); '
+            '2000 bytes from zero is below the 4096-byte threshold',
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // _autoReattachTmux()
   //
   // 再接続後に tmux セッションへ自動リアタッチする機能のユニットテスト。
@@ -2191,7 +2361,7 @@ void main() {
   // ---------------------------------------------------------------------------
   // checkConnection() — retry path: first probe fails, second succeeds
   //
-  // Lines 480-494: the two-probe loop in checkConnection().
+  // Two-probe sequence in checkConnection(): probe 1 → 1s delay → probe 2.
   // When the first keepAlive returns false but the second returns true,
   // the notifier must stay connected (not call _onDisconnected).
   // ---------------------------------------------------------------------------
@@ -2380,13 +2550,12 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
-  // checkConnection() — service identity guard during 1s retry delay (line 556)
+  // checkConnection() — service identity guard during 1s retry delay
   //
-  // Line 556:
-  //   if (attempt == 0) {
-  //     await Future.delayed(const Duration(seconds: 1));
-  //     if (!identical(service, _sshService)) return;  ← guard
-  //   }
+  // After probe 1 fails, checkConnection() waits 1 second before probe 2.
+  // The identity guard fires after the delay:
+  //   await Future.delayed(const Duration(seconds: 1));
+  //   if (!identical(service, _sshService)) return;  ← guard
   //
   // If _sshService is replaced (reconnect) or cleared (disconnect cleanup)
   // while checkConnection() is waiting the 1-second retry delay, the stale
@@ -2505,20 +2674,19 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
-  // checkConnection() — service identity guard after probe 2 keepAlive (line 550)
+  // checkConnection() — service identity guard after probe 2 keepAlive
   //
-  // Line 550:
+  // After probe 2's keepAlive() awaits, the identity guard fires:
   //   if (!identical(service, _sshService)) return;
   //
-  // This guard runs after EVERY keepAlive() call. For probe 2 (attempt=1) it
-  // is the last guard before _onDisconnected() — if _sshService was replaced
-  // or cleared while probe 2's keepAlive() was awaiting, checkConnection()
-  // must return early without calling _onDisconnected().
+  // This is the last guard before _onDisconnected() — if _sshService was
+  // replaced or cleared while probe 2's keepAlive() was awaiting,
+  // checkConnection() must return early without calling _onDisconnected().
   //
-  // The existing tests for line 556 (delay guard) only cover the window
-  // during the 1s retry delay between probes. These tests cover the window
-  // DURING probe 2's keepAlive() call, using a Completer-blocked fake service
-  // to hold probe 2 open while the swap is injected.
+  // The delay-guard tests (group above) only cover the window during the 1s
+  // delay between probes. These tests cover the window DURING probe 2's
+  // keepAlive() call, using a Completer-blocked fake service to hold probe 2
+  // open while the swap is injected.
   // ---------------------------------------------------------------------------
 
   group('checkConnection() service identity guard after probe 2', () {
@@ -2559,7 +2727,7 @@ void main() {
         notifier.checkConnection();
         async.flushMicrotasks(); // probe 1 → false; 1s timer scheduled
 
-        // Advance 1s: delay ends, delay identity check (line 556) passes,
+        // Advance 1s: delay ends, delay identity check passes,
         // probe 2 starts and blocks on probe2Completer.
         async.elapse(const Duration(seconds: 1));
 
@@ -2578,7 +2746,7 @@ void main() {
           ),
         );
 
-        // Complete probe 2 with false — identity check (line 550): original ≠ new
+        // Complete probe 2 with false — identity check: original ≠ new
         // → checkConnection() returns early without calling _onDisconnected().
         probe2Completer.complete(false);
         async.flushMicrotasks();
@@ -2758,6 +2926,33 @@ void main() {
           reason: 'errorMessage must be set from the caught exception');
       expect(state.errorMessage, contains('connection refused'),
           reason: 'errorMessage must reflect the actual connection error');
+    });
+
+    test('errorMessage uses AppError.message without class-name prefix', () async {
+      // _NetworkErrorSshClientService.connect() throws NetworkError('Host unreachable')
+      // directly, bypassing the SshClientService error-wrapping catch blocks.
+      // The notifier must store the clean message, not the toString() result
+      // ('NetworkError: Host unreachable').
+      notifier.sshServiceFactoryOverride = () => _NetworkErrorSshClientService();
+
+      await notifier.connect(
+        config: const ConnectionConfig(
+          label: 'test-server',
+          host: '127.0.0.1',
+          username: 'u',
+        ),
+      );
+
+      final state =
+          container.read(terminalConnectionProvider('connect-fail-test'));
+      expect(state.errorMessage, 'Host unreachable',
+          reason: 'AppError.message must be used, not toString() which adds '
+              'a "NetworkError: " class-name prefix');
+      expect(
+        state.errorMessage,
+        isNot(contains('NetworkError:')),
+        reason: 'class-name prefix must not appear in user-facing errorMessage',
+      );
     });
 
     test('preserves hostLabel after failure', () async {
@@ -3057,6 +3252,61 @@ void main() {
     });
 
     // -------------------------------------------------------------------------
+    // Max-retries: dangling 10th timer must be cancelled on give-up.
+    //
+    // Before this fix, _scheduleReconnect() returned early on the 11th call
+    // without cancelling the 10th timer.  That timer (30s) would fire silently
+    // 30 s after giving up, triggering an unexpected reconnect attempt.
+    // -------------------------------------------------------------------------
+    test('giving up at max retries cancels the pending 10th timer', () {
+      fakeAsync((async) {
+        const config = ConnectionConfig(
+          label: 'test', host: '127.0.0.1', username: 'u',
+        );
+        notifier.sshServiceFactoryOverride = () => _FailFastSshClientService();
+        notifier.initConnectedStateForTesting(
+          sshService: fakeService,
+          connectedState: const TerminalConnectionState(
+            status: ConnectionStatus.disconnected,
+            hostLabel: 'test-host',
+          ),
+          config: config,
+        );
+
+        // Call _scheduleReconnect() 10 times (attempts #1–#10).
+        // Each call (except the 11th) cancels the previous timer and creates a
+        // new 30s timer.  The 10th call leaves a live 30s timer (_retryTimer).
+        for (var i = 0; i < 10; i++) {
+          notifier.triggerScheduleReconnectForTesting();
+        }
+
+        var state = container.read(terminalConnectionProvider('timer-fire-test'));
+        expect(state.errorMessage, 'Reconnecting in 30s... (attempt #10)',
+            reason: 'precondition: 10 retries scheduled');
+
+        // 11th call → _retryCount > 10 → gives up and MUST cancel the 10th timer.
+        notifier.triggerScheduleReconnectForTesting();
+        state = container.read(terminalConnectionProvider('timer-fire-test'));
+        expect(state.errorMessage, 'Connection lost. Tap to reconnect.',
+            reason: 'precondition: gave up after max retries');
+
+        // Advance 30s — the 10th timer must NOT fire (it was cancelled).
+        // If it fired, _attemptReconnect() would fail and _scheduleReconnect()
+        // would set "Reconnecting in 3s... (attempt #1)".
+        async.elapse(const Duration(seconds: 30));
+        async.flushMicrotasks();
+
+        state = container.read(terminalConnectionProvider('timer-fire-test'));
+        expect(
+          state.errorMessage,
+          'Connection lost. Tap to reconnect.',
+          reason: 'the 10th timer must have been cancelled; no silent reconnect '
+              'attempt should fire after giving up',
+        );
+      });
+    });
+
+    // -------------------------------------------------------------------------
     // reconnect() cancels pending auto-retry timer and resets _retryCount.
     //
     // When the user taps "Reconnect" while an auto-retry timer is pending:
@@ -3327,6 +3577,43 @@ void main() {
       );
     });
 
+    // When _attemptReconnect() catches an AppError (e.g. NetworkError), the raw
+    // error text must NOT appear in errorMessage.  _scheduleReconnect() always
+    // runs immediately after and sets the user-facing "Reconnecting in Xs..."
+    // message, so errorMessage from the catch block is never the final value.
+    test(
+        'reconnect() failure with AppError shows schedule message, '
+        'not raw AppError text',
+        () async {
+      const config = ConnectionConfig(
+        label: 'prod', host: '192.168.1.1', username: 'admin',
+      );
+      // _NetworkErrorSshClientService.connect() throws NetworkError('Host unreachable').
+      // The reconnect path must not expose the raw error — _scheduleReconnect()
+      // sets the user-facing message instead.
+      notifier.sshServiceFactoryOverride = () => _NetworkErrorSshClientService();
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.disconnected,
+          hostLabel: 'prod',
+        ),
+        config: config,
+      );
+
+      await notifier.reconnect();
+
+      final state =
+          container.read(terminalConnectionProvider('manual-reconnect-test'));
+      expect(state.errorMessage, 'Reconnecting in 3s... (attempt #1)',
+          reason: '_scheduleReconnect() sets the user-facing message; '
+              'the raw AppError from _connectCore() must not be the final value');
+      expect(state.errorMessage, isNot(contains('Host unreachable')),
+          reason: 'raw AppError.message must not appear in errorMessage');
+      expect(state.errorMessage, isNot(contains('NetworkError')),
+          reason: 'exception class name must not appear in errorMessage');
+    });
+
     // reconnect() must reset _retryCount even when prior auto-reconnect
     // attempts have already been running. Without the reset, a user pressing
     // "Reconnect" after 5 auto-failures would wait 30s instead of 3s.
@@ -3411,6 +3698,48 @@ void main() {
             'created by _connectCore() when the connection attempt fails, '
             'so the socket is freed immediately rather than held until the '
             'next retry fires',
+      );
+    });
+
+    // _cleanupConnections() wraps _sshService?.disconnect() in try/catch so
+    // that a service whose disconnect() throws does not propagate the error
+    // up through _attemptReconnect()'s catch block (or connect()'s catch).
+    // Without the fix, a throwing disconnect() would crash the reconnect flow.
+    test(
+        '_cleanupConnections() swallows disconnect() exception — reconnect '
+        'completes normally even when the SSH service throws on disconnect',
+        () async {
+      late _ThrowingDisconnectSshClientService throwingService;
+      const config = ConnectionConfig(
+        label: 'prod', host: '192.168.1.1', username: 'admin',
+      );
+      notifier.sshServiceFactoryOverride = () {
+        throwingService = _ThrowingDisconnectSshClientService();
+        return throwingService;
+      };
+      notifier.initConnectedStateForTesting(
+        sshService: fakeService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.disconnected,
+          hostLabel: 'prod',
+        ),
+        config: config,
+      );
+
+      // reconnect() must not throw even though the service's disconnect() throws.
+      await expectLater(notifier.reconnect(), completes);
+
+      expect(
+        throwingService.disconnectCalled,
+        isTrue,
+        reason: 'disconnect() must be called even though it throws',
+      );
+      expect(
+        container
+            .read(terminalConnectionProvider('manual-reconnect-test'))
+            .status,
+        ConnectionStatus.disconnected,
+        reason: 'state must be disconnected after the failed reconnect',
       );
     });
   });
@@ -3608,6 +3937,34 @@ void main() {
       expect(notifier.isNotificationSentForTesting, isFalse,
           reason: '_setConnectedState must reset _notificationSent so that '
               'background notifications can fire for the new session');
+    });
+
+    test('resets _keepAliveFailCount so 3-strike rule starts fresh after reconnect',
+        () async {
+      // Arrange: connected state with a keepAlive service that always fails.
+      // _keepAliveFailCount must be reset to 0 by _setConnectedState so that
+      // failures from a previous session do not bleed into the new connection.
+      final failingService = _FakeSshClientService()..keepAliveResult = false;
+      notifier.initConnectedStateForTesting(
+        sshService: failingService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+      );
+
+      // Accumulate 2 failures — one more would trigger _onDisconnected().
+      await notifier.activeKeepAlive();
+      await notifier.activeKeepAlive();
+      expect(notifier.keepAliveFailCountForTesting, 2,
+          reason: 'precondition: two keepAlive failures must accumulate to count 2');
+
+      // Simulate a successful reconnect; _setConnectedState must reset the count.
+      notifier.callSetConnectedStateForTesting(Terminal(maxLines: 1000));
+
+      expect(notifier.keepAliveFailCountForTesting, 0,
+          reason: '_setConnectedState must reset _keepAliveFailCount to 0 so '
+              'the new session starts with a clean slate');
     });
   });
 
@@ -4109,6 +4466,62 @@ void main() {
         final state = container.read(terminalConnectionProvider(connectionId));
         expect(state.status, ConnectionStatus.disconnected,
             reason: 'must not attempt reconnect when _config is null');
+      });
+    });
+
+    test('no reconnect when status is reconnecting (_isReconnecting guard)', () {
+      // When status == reconnecting, _isReconnecting is always true.
+      // The connectivity listener's `!_isReconnecting` guard prevents a
+      // second concurrent attempt — the in-progress reconnect is left to
+      // complete (or fail and schedule its own retry).
+      fakeAsync((async) {
+        late _ControllableConnectivityMonitor connectivityMonitor;
+        final container = ProviderContainer(
+          overrides: [
+            connectivityProvider.overrideWith(() {
+              connectivityMonitor = _ControllableConnectivityMonitor();
+              return connectivityMonitor;
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        final notifier = container.read(
+          terminalConnectionProvider(connectionId).notifier,
+        );
+        notifier.sshServiceFactoryOverride = () => _FailFastSshClientService();
+
+        final fakeService = _FakeSshClientService();
+        notifier.initConnectedStateForTesting(
+          sshService: fakeService,
+          connectedState: const TerminalConnectionState(
+            status: ConnectionStatus.connected,
+            hostLabel: 'test-host',
+          ),
+          config: config,
+        );
+
+        // Simulate the reconnecting state: _isReconnecting = true, status = reconnecting.
+        notifier.setIsReconnectingForTesting(true);
+        notifier.initConnectedStateForTesting(
+          sshService: fakeService,
+          connectedState: const TerminalConnectionState(
+            status: ConnectionStatus.reconnecting,
+            hostLabel: 'test-host',
+          ),
+          config: config,
+        );
+
+        // Network restores while a reconnect is already in progress.
+        connectivityMonitor.setStatus(NetworkStatus.connected);
+        async.flushMicrotasks();
+
+        // Status must remain reconnecting — the listener must not have fired
+        // because `!_isReconnecting` prevents entry when a retry is in flight.
+        final state = container.read(terminalConnectionProvider(connectionId));
+        expect(state.status, ConnectionStatus.reconnecting,
+            reason: 'connectivity restore must not interrupt an in-progress '
+                'reconnect attempt (_isReconnecting guard)');
       });
     });
 

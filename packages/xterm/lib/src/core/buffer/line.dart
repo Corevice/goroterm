@@ -72,10 +72,10 @@ class BufferLine with IndexedItem {
   CellData createCellData(int index) {
     final cellData = CellData.empty();
     final offset = index * _cellSize;
-    _data[offset + _cellForeground] = cellData.foreground;
-    _data[offset + _cellBackground] = cellData.background;
-    _data[offset + _cellAttributes] = cellData.flags;
-    _data[offset + _cellContent] = cellData.content;
+    cellData.foreground = _data[offset + _cellForeground];
+    cellData.background = _data[offset + _cellBackground];
+    cellData.flags = _data[offset + _cellAttributes];
+    cellData.content = _data[offset + _cellContent];
     return cellData;
   }
 
@@ -288,19 +288,12 @@ class BufferLine with IndexedItem {
   /// line.
   void copyFrom(BufferLine src, int srcCol, int dstCol, int len) {
     resize(dstCol + len);
-
-    // data.setRange(
-    //   dstCol * _cellSize,
-    //   (dstCol + len) * _cellSize,
-    //   Uint32List.sublistView(src.data, srcCol * _cellSize, len * _cellSize),
-    // );
-
-    var srcOffset = srcCol * _cellSize;
-    var dstOffset = dstCol * _cellSize;
-
-    for (var i = 0; i < len * _cellSize; i++) {
-      _data[dstOffset++] = src._data[srcOffset++];
-    }
+    _data.setRange(
+      dstCol * _cellSize,
+      (dstCol + len) * _cellSize,
+      src._data,
+      srcCol * _cellSize,
+    );
   }
 
   static int _calcCapacity(int length) {
@@ -332,14 +325,39 @@ class BufferLine with IndexedItem {
     }
 
     final builder = StringBuffer();
+    // Count of spaces from empty cells (codePoint == 0) not yet written.
+    // Flushed into [builder] only when a real character follows, so purely
+    // trailing empty-cell spaces are never emitted.  Actual space characters
+    // (codePoint == 0x20) are written directly and are always preserved —
+    // this matters for wrapped lines whose trailing space is real content.
+    var pendingSpaces = 0;
+
     for (var i = from; i < to; i++) {
       final codePoint = getCodePoint(i);
       final width = getWidth(i);
-      if (codePoint != 0 && i + width <= to) {
+      if (codePoint == 0) {
+        // The second cell of a wide character (emoji, CJK, etc.) always has
+        // codePoint == 0.  Do not count it as a space — that would insert
+        // spurious whitespace between adjacent wide chars (e.g. "😀😁" → "😀 😁").
+        final isPrevWide = i > 0 && getWidth(i - 1) == 2;
+        if (!isPrevWide) {
+          // Empty cell: defer as a pending space.  If a real character follows
+          // later in the range, these spaces will be flushed; otherwise they
+          // are dropped, trimming trailing empty cells automatically.
+          pendingSpaces++;
+        }
+      } else if (i + width <= to) {
+        // Real character: flush any deferred empty-cell spaces first.
+        while (pendingSpaces > 0) {
+          builder.writeCharCode(0x20);
+          pendingSpaces--;
+        }
         builder.writeCharCode(codePoint);
       }
     }
 
+    // pendingSpaces is intentionally not flushed here, so trailing empty cells
+    // are silently dropped from the output.
     return builder.toString();
   }
 

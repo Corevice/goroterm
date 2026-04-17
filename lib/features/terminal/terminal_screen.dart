@@ -27,6 +27,7 @@ import '../tmux/tmux_provider.dart';
 import '../../widgets/quick_action_bar.dart';
 import '../../core/utils/app_logger.dart';
 import '../../core/utils/shell_utils.dart';
+import '../../core/utils/url_utils.dart';
 import '../../widgets/terminal_scroll_interceptor.dart';
 import '../../core/notification/notification_service.dart';
 import '../claude_usage/claude_usage_dialog.dart';
@@ -305,12 +306,14 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       },
       appBar: AppBar(
         backgroundColor: Colors.grey[900],
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.folder_open),
-            tooltip: 'File Browser',
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back to connections',
+          onPressed: () {
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            }
+          },
         ),
         title: Text(activeConnectionState.hostLabel ?? activeSession.label),
         actions: [
@@ -323,6 +326,13 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             ),
+          Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.folder_open),
+              tooltip: 'File Browser',
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            ),
+          ),
           Builder(
             builder: (context) => IconButton(
               icon: const Icon(Icons.view_list),
@@ -737,11 +747,6 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     }
   }
 
-  /// URL 検出用の正規表現
-  static final _urlRegExp = RegExp(
-    r'https?://[^\s\x00-\x1F\x7F<>"{}|\\^`\[\]）】」』）]+',
-  );
-
   /// 選択範囲を含む行からURLを検出する。
   /// 選択の開始位置を含むURLを優先的に返す。
   String? _detectUrlAroundSelection(Terminal terminal) {
@@ -751,41 +756,11 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     final buffer = terminal.buffer;
     final startY = selection.begin.y;
 
-    // 選択開始行のテキストを取得（wrapped 行を結合）
-    final lineText = _getFullLineText(buffer, startY);
-    if (lineText == null) return null;
-
-    // 行内のすべての URL を検出し、選択開始列を含むものを返す
-    final startX = selection.begin.x;
-    for (final match in _urlRegExp.allMatches(lineText)) {
-      if (startX >= match.start && startX <= match.end) {
-        return _cleanUrl(match.group(0)!);
-      }
-    }
-
-    // 選択位置と完全に重ならなくても、行内にURLがあればそれを返す
-    final firstMatch = _urlRegExp.firstMatch(lineText);
-    if (firstMatch != null) {
-      return _cleanUrl(firstMatch.group(0)!);
-    }
-
-    return null;
-  }
-
-  /// バッファから指定行のテキストを取得する。wrapped 行を結合する。
-  String? _getFullLineText(dynamic buffer, int absoluteY) {
+    // 選択開始行のテキストを取得
     final lines = buffer.lines;
-    if (absoluteY < 0 || absoluteY >= lines.length) return null;
-    return lines[absoluteY].getText();
-  }
-
-  /// URL 末尾の不要な句読点・括弧を除去する。
-  String _cleanUrl(String url) {
-    // 末尾の句読点や閉じ括弧を除去（URL の一部でないことが多い）
-    while (url.isNotEmpty && '.,:;!?)>」』）】'.contains(url[url.length - 1])) {
-      url = url.substring(0, url.length - 1);
-    }
-    return url;
+    if (startY < 0 || startY >= lines.length) return null;
+    final lineText = lines[startY].getText();
+    return detectUrlInLine(lineText, startX: selection.begin.x);
   }
 
   void _showToolbar() {
@@ -847,6 +822,14 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       }
       return;
     }
+
+    // Alt buffer 使用中（Claude Code プランモード等の TUI アプリ）では
+    // 長押し選択モードを無効化する。TUI のタップ操作と競合して
+    // ポインタ入力がサスペンドされ、選択肢をタップできなくなるため。
+    final terminal = ref.read(
+      terminalConnectionProvider(widget.sessionId).select((s) => s.terminal),
+    );
+    if (terminal != null && terminal.isUsingAltBuffer) return;
 
     // 長押し (400ms) で自動的に選択モードに入る
     _longPressSelectTimer?.cancel();
@@ -1061,6 +1044,33 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
 
   static const _uploadDir = '/tmp/.terminal-uploads';
 
+  /// Creates [_uploadDir] on the remote if it does not exist, then uploads
+  /// [localFile] to [remotePath] via SFTP.
+  Future<void> _sftpWriteFile(
+    SftpClient sftp,
+    File localFile,
+    String remotePath,
+  ) async {
+    try {
+      await sftp.stat(_uploadDir);
+    } catch (_) {
+      await sftp.mkdir(_uploadDir);
+    }
+    final remoteFile = await sftp.open(
+      remotePath,
+      mode: SftpFileOpenMode.write |
+          SftpFileOpenMode.create |
+          SftpFileOpenMode.truncate,
+    );
+    try {
+      final inputStream =
+          localFile.openRead().map((chunk) => Uint8List.fromList(chunk));
+      await remoteFile.write(inputStream).done;
+    } finally {
+      await remoteFile.close();
+    }
+  }
+
   bool _isVideo(String fileName) {
     final lower = fileName.toLowerCase();
     return _videoExtensions.any((ext) => lower.endsWith(ext));
@@ -1137,29 +1147,10 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     try {
       sftp = await channelManager.openIndependentSftpChannel();
 
-      // ディレクトリがなければ作成
-      try {
-        await sftp.stat(_uploadDir);
-      } catch (_) {
-        await sftp.mkdir(_uploadDir);
-      }
-
       final remotePath = '$_uploadDir/${ts}_$fileName';
 
       // SFTP アップロード
-      final remoteFile = await sftp.open(
-        remotePath,
-        mode: SftpFileOpenMode.write |
-            SftpFileOpenMode.create |
-            SftpFileOpenMode.truncate,
-      );
-      try {
-        final inputStream =
-            localFile.openRead().map((chunk) => Uint8List.fromList(chunk));
-        await remoteFile.write(inputStream).done;
-      } finally {
-        await remoteFile.close();
-      }
+      await _sftpWriteFile(sftp, localFile, remotePath);
 
       String pastePath = remotePath;
 
@@ -1275,31 +1266,15 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       );
     }
 
+    SftpClient? sftp;
     try {
-      final sftp = await channelManager.openSftpChannel();
-
-      try {
-        await sftp.stat(_uploadDir);
-      } catch (_) {
-        await sftp.mkdir(_uploadDir);
-      }
+      sftp = await channelManager.openIndependentSftpChannel();
 
       final remotePath = '$_uploadDir/${ts}_$fileName';
       final localFile = File(localPath);
 
-      final remoteFile = await sftp.open(
-        remotePath,
-        mode: SftpFileOpenMode.write |
-            SftpFileOpenMode.create |
-            SftpFileOpenMode.truncate,
-      );
-      try {
-        final inputStream =
-            localFile.openRead().map((chunk) => Uint8List.fromList(chunk));
-        await remoteFile.write(inputStream).done;
-      } finally {
-        await remoteFile.close();
-      }
+      // SFTP アップロード
+      await _sftpWriteFile(sftp, localFile, remotePath);
 
       // 一時ファイル削除
       try {
@@ -1322,6 +1297,8 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
             SnackBar(content: Text('Upload failed: $e')),
           );
       }
+    } finally {
+      try { sftp?.close(); } catch (_) {}
     }
   }
 

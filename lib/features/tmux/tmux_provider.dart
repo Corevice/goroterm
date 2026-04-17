@@ -296,9 +296,13 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     final session = await channelManager.executeCommand(command);
     try {
       // Collect stdout and stderr in parallel to avoid serial timeout accumulation.
-      final results = await Future.wait([
-        session.stdout.toList(),
-        session.stderr.toList(),
+      // cast<List<int>>() is required because Stream<Uint8List> is not a subtype
+      // of Stream<List<int>> in Dart's type system despite Uint8List implementing
+      // List<int>.  This matches the pattern used in _readAbsolutePath().
+      const decoder = Utf8Decoder(allowMalformed: true);
+      final results = await Future.wait<String>([
+        session.stdout.cast<List<int>>().transform(decoder).join(),
+        session.stderr.cast<List<int>>().transform(decoder).join(),
       ]).timeout(timeout);
       // Use a short close-ACK timeout: once both streams are drained the server
       // has sent EOF, so the channel close handshake should complete within a
@@ -312,15 +316,7 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       } on TimeoutException {
         // Close-ACK was slow but output is already available — treat as success.
       }
-      final output = utf8.decode(
-        results[0].expand((e) => e).toList(),
-        allowMalformed: true,
-      );
-      final error = utf8.decode(
-        results[1].expand((e) => e).toList(),
-        allowMalformed: true,
-      );
-      return (output, error, session.exitCode);
+      return (results[0], results[1], session.exitCode);
     } finally {
       try { session.close(); } catch (_) {}
     }

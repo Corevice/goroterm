@@ -11,6 +11,9 @@ class ConnectionListScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionsAsync = ref.watch(connectionListProvider);
+    final activeSessions = ref.watch(
+      sessionManagerProvider.select((s) => s.sessions.length),
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -32,29 +35,37 @@ class ConnectionListScreen extends ConsumerWidget {
       ),
       body: connectionsAsync.when(
         data: (connections) {
-          if (connections.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.terminal, size: 64, color: Colors.grey[600]),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No connections yet',
-                    style: Theme.of(context).textTheme.titleMedium,
+          final list = connections.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.terminal, size: 64, color: Colors.grey[600]),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No connections yet',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      const Text('Tap + to add a new SSH connection'),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  const Text('Tap + to add a new SSH connection'),
-                ],
-              ),
-            );
-          }
-          return ListView.builder(
-            itemCount: connections.length,
-            itemBuilder: (context, index) {
-              final conn = connections[index];
-              return _ConnectionTile(connection: conn);
-            },
+                )
+              : ListView.builder(
+                  itemCount: connections.length,
+                  itemBuilder: (context, index) {
+                    final conn = connections[index];
+                    return _ConnectionTile(connection: conn);
+                  },
+                );
+
+          if (activeSessions == 0) return list;
+
+          return Column(
+            children: [
+              _ResumeTerminalBanner(tabCount: activeSessions),
+              Expanded(child: list),
+            ],
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -69,6 +80,40 @@ class ConnectionListScreen extends ConsumerWidget {
           },
           tooltip: 'Add connection',
           child: const Icon(Icons.add),
+        ),
+      ),
+    );
+  }
+}
+
+class _ResumeTerminalBanner extends StatelessWidget {
+  const _ResumeTerminalBanner({required this.tabCount});
+
+  final int tabCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final label =
+        'Resume terminal ($tabCount tab${tabCount == 1 ? '' : 's'})';
+    return Material(
+      color: Theme.of(context).colorScheme.primaryContainer,
+      child: InkWell(
+        onTap: () => Navigator.of(context).pushNamed('/terminal'),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              const Icon(Icons.terminal),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
         ),
       ),
     );

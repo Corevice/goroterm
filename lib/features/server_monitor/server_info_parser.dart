@@ -229,12 +229,16 @@ class ServerInfoParser {
         }
       } else {
         // df -B1 --output=target,size,used,avail,pcent
+        // Column order: target, size, used, avail, pcent.
+        // Mount points may contain spaces (e.g. "/home/my drive"), so derive
+        // size/used/percent by counting from the right (always numeric) and
+        // reconstruct the mount point by joining everything to the left.
+        // This mirrors the df -k mount-point handling above.
         if (parts.length >= 5) {
-          final mountPoint = parts[0];
-          final size = int.tryParse(parts[1]) ?? 0;
-          final used = int.tryParse(parts[2]) ?? 0;
-          final percent =
-              int.tryParse(parts[4].replaceAll('%', '')) ?? 0;
+          final percent = int.tryParse(parts.last.replaceAll('%', '')) ?? 0;
+          final used = int.tryParse(parts[parts.length - 3]) ?? 0;
+          final size = int.tryParse(parts[parts.length - 4]) ?? 0;
+          final mountPoint = parts.sublist(0, parts.length - 4).join(' ');
           if (size > 0) {
             disks.add(DiskInfo(
               mountPoint: mountPoint,

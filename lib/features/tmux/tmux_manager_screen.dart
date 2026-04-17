@@ -87,6 +87,7 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
                     )
                   : _SessionListView(
                       state: state,
+                      canOpenAll: widget.onAttachSession != null,
                       onRefresh: () => ref
                           .read(tmuxProvider(widget.connectionId).notifier)
                           .refresh(),
@@ -99,6 +100,13 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
                               .attachSession(name);
                         }
                       },
+                      onOpenAll: widget.onAttachSession != null
+                          ? () {
+                              for (final s in state.sessions) {
+                                widget.onAttachSession!(s.name);
+                              }
+                            }
+                          : null,
                       onDelete: (name) => ref
                           .read(tmuxProvider(widget.connectionId).notifier)
                           .killSession(name),
@@ -227,15 +235,19 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
 class _SessionListView extends StatefulWidget {
   const _SessionListView({
     required this.state,
+    required this.canOpenAll,
     required this.onRefresh,
     required this.onAttach,
+    required this.onOpenAll,
     required this.onDelete,
     required this.onRename,
   });
 
   final TmuxState state;
+  final bool canOpenAll;
   final Future<void> Function() onRefresh;
   final void Function(String name) onAttach;
+  final VoidCallback? onOpenAll;
   final Future<void> Function(String name) onDelete;
   final Future<void> Function(String oldName, String newName) onRename;
 
@@ -256,12 +268,25 @@ class _SessionListViewState extends State<_SessionListView> {
       );
     }
 
+    final showOpenAll =
+        widget.canOpenAll && widget.state.sessions.length > 1;
+
     return RefreshIndicator(
       onRefresh: widget.onRefresh,
       child: ListView.builder(
-        itemCount: widget.state.sessions.length,
+        itemCount: widget.state.sessions.length + (showOpenAll ? 1 : 0),
         itemBuilder: (context, index) {
-          final session = widget.state.sessions[index];
+          if (showOpenAll && index == 0) {
+            return _OpenAllButton(
+              count: widget.state.sessions.length,
+              onPressed: () {
+                widget.onOpenAll?.call();
+                Navigator.of(context).pop();
+              },
+            );
+          }
+          final sessionIdx = showOpenAll ? index - 1 : index;
+          final session = widget.state.sessions[sessionIdx];
           return _SessionCard(
             session: session,
             onAttach: () {
@@ -402,6 +427,32 @@ class _SessionListViewState extends State<_SessionListView> {
         );
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+class _OpenAllButton extends StatelessWidget {
+  const _OpenAllButton({required this.count, required this.onPressed});
+
+  final int count;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: const Icon(Icons.open_in_new, size: 18),
+        label: Text('Open all $count sessions'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.tealAccent,
+          side: BorderSide(color: Colors.tealAccent.withValues(alpha: 0.5)),
+          minimumSize: const Size.fromHeight(40),
+        ),
+      ),
+    );
   }
 }
 

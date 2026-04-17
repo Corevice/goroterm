@@ -283,16 +283,7 @@ class TerminalConnectionNotifier
         _outputBytesSinceLastIdle += data.length;
         _resetIdleNotifyTimer();
       },
-      onDone: () {
-        // PTY の stdout ストリームが閉じた = シェルが終了した可能性。
-        // SSH 切断（ネットワーク断）の場合も onDone が発火するため、
-        // SSH 接続がまだ生きているか確認してからシェル終了と判断する。
-        if (state.status == ConnectionStatus.connected &&
-            (_sshService?.isConnected ?? false)) {
-          AppLogger.instance.log('[SSH][$arg] shell exited (stdout done)');
-          state = state.copyWith(shellExited: true);
-        }
-      },
+      onDone: _onStdoutDone,
     );
 
     // 現在のクライアント参照を保持し、古いクライアントの done イベントを無視する。
@@ -723,15 +714,20 @@ class TerminalConnectionNotifier
     return _outputBuffer.toString();
   }
 
-  /// テスト専用: _stdoutSubscription の onDone コールバックと同じロジックを実行する。
-  /// シェルの stdout ストリームが閉じた（PTY 終了）時の挙動をテストするために使用する。
-  @visibleForTesting
-  void triggerStdoutDoneForTesting() {
+  /// PTY の stdout ストリームが閉じた（シェル終了 or ネットワーク断）際のコールバック。
+  /// SSH 接続がまだ生きているかを確認し、生きていればシェルが正常終了したと判断する。
+  void _onStdoutDone() {
     if (state.status == ConnectionStatus.connected &&
         (_sshService?.isConnected ?? false)) {
+      AppLogger.instance.log('[SSH][$arg] shell exited (stdout done)');
       state = state.copyWith(shellExited: true);
     }
   }
+
+  /// テスト専用: _stdoutSubscription の onDone コールバックを直接呼び出す。
+  /// シェルの stdout ストリームが閉じた（PTY 終了）時の挙動をテストするために使用する。
+  @visibleForTesting
+  void triggerStdoutDoneForTesting() => _onStdoutDone();
 
   /// テスト専用: _handlePrivateOSC を直接呼び出す。
   /// OSC 52 クリップボード統合のユニットテストに使用する。
@@ -739,9 +735,13 @@ class TerminalConnectionNotifier
   void handlePrivateOscForTesting(String code, List<String> args) =>
       _handlePrivateOSC(code, args);
 
-  /// 認識されない private OSC を受信したときのログ。
+  /// Private OSC ハンドラ。OSC 52 はクリップボード書き込みに委譲する。
   void _handlePrivateOSC(String code, List<String> args) {
     AppLogger.instance.log('[SSH][$arg] onPrivateOSC: code=$code, args.length=${args.length}');
+    final text = decodeOsc52Clipboard(code, args);
+    if (text != null) {
+      _handleClipboardWrite(text);
+    }
   }
 
   /// OSC 52 クリップボード書き込みハンドラ。
