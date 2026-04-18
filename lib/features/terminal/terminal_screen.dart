@@ -537,43 +537,48 @@ class _TabStripState extends State<_TabStrip> {
             session.sessionId,
             () => GlobalKey(),
           );
-          return ReorderableDragStartListener(
+          return ReorderableDelayedDragStartListener(
             key: ValueKey(session.sessionId),
             index: index,
             child: InkWell(
               key: tabKey,
               onTap: () => widget.onSelect(session.sessionId),
               child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: BoxDecoration(
-                color: isActive ? Colors.grey[800] : Colors.grey[900],
-                border: isActive
-                    ? const Border(
-                        bottom: BorderSide(color: Colors.tealAccent, width: 2))
-                    : null,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    session.label,
-                    style: TextStyle(
-                      color: isActive ? Colors.white : Colors.grey[400],
-                      fontSize: 12,
+                padding: const EdgeInsets.only(left: 8),
+                decoration: BoxDecoration(
+                  color: isActive ? Colors.grey[800] : Colors.grey[900],
+                  border: isActive
+                      ? const Border(
+                          bottom:
+                              BorderSide(color: Colors.tealAccent, width: 2))
+                      : null,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      session.label,
+                      style: TextStyle(
+                        color: isActive ? Colors.white : Colors.grey[400],
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  InkWell(
-                    onTap: () => widget.onClose(session.sessionId),
-                    child: Icon(
-                      Icons.close,
-                      size: 14,
-                      color: Colors.grey[400],
+                    InkWell(
+                      onTap: () => widget.onClose(session.sessionId),
+                      customBorder: const CircleBorder(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 10),
+                        child: Icon(
+                          Icons.close,
+                          size: 14,
+                          color: Colors.grey[400],
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
             ),
           );
         },
