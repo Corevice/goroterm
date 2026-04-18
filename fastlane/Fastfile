@@ -1,11 +1,24 @@
 default_platform(:ios)
 
 platform :android do
-  desc "Upload AAB to Google Play Internal Testing"
+  desc "Upload AAB to Google Play Internal Testing (draft)"
   lane :deploy do
     upload_to_play_store(
       track: "internal",
       release_status: "draft",
+      aab: "build/app/outputs/bundle/release/app-release.aab",
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+
+  desc "Upload AAB to Google Play Production (100% rollout)"
+  lane :deploy_production do
+    upload_to_play_store(
+      track: "production",
+      release_status: "completed",
       aab: "build/app/outputs/bundle/release/app-release.aab",
       skip_upload_metadata: true,
       skip_upload_changelogs: true,
