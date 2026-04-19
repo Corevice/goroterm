@@ -8,6 +8,8 @@ import 'package:terminal_ssh_app/core/storage/secure_storage.dart';
 import 'package:terminal_ssh_app/features/connections/connection_edit_screen.dart';
 import 'package:terminal_ssh_app/features/connections/connection_provider.dart';
 
+import '../../test_localizations.dart';
+
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
@@ -54,7 +56,7 @@ Widget _buildNew() {
     overrides: [
       connectionListProvider.overrideWith(_FakeConnectionListNotifier.new),
     ],
-    child: const MaterialApp(home: ConnectionEditScreen()),
+    child: localizedTestApp(home: const ConnectionEditScreen()),
   );
 }
 
@@ -68,7 +70,7 @@ Widget _buildEdit({
       secureStorageProvider.overrideWith((ref) => mockStorage),
       connectionListProvider.overrideWith(_FakeConnectionListNotifier.new),
     ],
-    child: const MaterialApp(home: ConnectionEditScreen(connectionId: 1)),
+    child: localizedTestApp(home: const ConnectionEditScreen(connectionId: 1)),
   );
 }
 

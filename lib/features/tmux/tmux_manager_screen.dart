@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/error/app_error.dart';
@@ -58,7 +59,7 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to create session: $e')),
+          SnackBar(content: Text(AppLocalizations.of(context).failedToCreateSession(e.toString()))),
         );
       }
     }
@@ -122,6 +123,7 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
   }
 
   Widget _buildHeader() {
+    final l = AppLocalizations.of(context);
     return Container(
       color: Colors.grey[850],
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -129,10 +131,10 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
         children: [
           const Icon(Icons.view_list, color: Colors.tealAccent, size: 20),
           const SizedBox(width: 8),
-          const Expanded(
+          Expanded(
             child: Text(
-              'tmux Sessions',
-              style: TextStyle(
+              l.tmuxSessions,
+              style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
               ),
@@ -140,13 +142,13 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
           ),
           IconButton(
             icon: Icon(Icons.refresh, color: Colors.grey[400], size: 20),
-            tooltip: 'Refresh',
+            tooltip: l.refresh,
             onPressed: () =>
                 ref.read(tmuxProvider(widget.connectionId).notifier).refresh(),
           ),
           IconButton(
             icon: const Icon(Icons.add, color: Colors.tealAccent, size: 20),
-            tooltip: 'New session',
+            tooltip: l.newSession,
             onPressed: () => _showCreateDialog(context),
           ),
         ],
@@ -160,6 +162,7 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
             .map((s) => s.name)
             .toList() ??
         [];
+    final l = AppLocalizations.of(context);
 
     final controller = TextEditingController();
     String? errorText;
@@ -170,16 +173,16 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           backgroundColor: Colors.grey[850],
-          title: const Text(
-            'New tmux Session',
-            style: TextStyle(color: Colors.white),
+          title: Text(
+            l.newTmuxSession,
+            style: const TextStyle(color: Colors.white),
           ),
           content: TextField(
             controller: controller,
             autofocus: true,
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
-              hintText: 'Session name',
+              hintText: l.sessionName,
               hintStyle: TextStyle(color: Colors.grey[600]),
               errorText: errorText,
               enabledBorder: const UnderlineInputBorder(
@@ -199,7 +202,7 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
+              child: Text(l.cancel),
             ),
             TextButton(
               onPressed: errorText != null
@@ -217,9 +220,9 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
                       Navigator.of(ctx).pop();
                       _createSession(name);
                     },
-              child: const Text(
-                'Create',
-                style: TextStyle(color: Colors.tealAccent),
+              child: Text(
+                l.create,
+                style: const TextStyle(color: Colors.tealAccent),
               ),
             ),
           ],
@@ -259,10 +262,10 @@ class _SessionListViewState extends State<_SessionListView> {
   @override
   Widget build(BuildContext context) {
     if (widget.state.sessions.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
-          'No sessions.\nTap + to create one.',
-          style: TextStyle(color: Colors.grey),
+          AppLocalizations.of(context).noSessionsTapPlus,
+          style: const TextStyle(color: Colors.grey),
           textAlign: TextAlign.center,
         ),
       );
@@ -302,28 +305,29 @@ class _SessionListViewState extends State<_SessionListView> {
   }
 
   Future<void> _confirmDelete(String name) async {
+    final l = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.grey[850],
-        title: const Text(
-          'Delete Session',
-          style: TextStyle(color: Colors.white),
+        title: Text(
+          l.deleteSession,
+          style: const TextStyle(color: Colors.white),
         ),
         content: Text(
-          'Kill session "$name"? This will close all windows.',
+          l.killSessionConfirm(name),
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+            child: Text(l.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text(
-              'Kill',
-              style: TextStyle(color: Colors.red),
+            child: Text(
+              l.kill,
+              style: const TextStyle(color: Colors.red),
             ),
           ),
         ],
@@ -335,7 +339,7 @@ class _SessionListViewState extends State<_SessionListView> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to kill session: $e')),
+            SnackBar(content: Text(AppLocalizations.of(context).failedToKillSession(e.toString()))),
           );
         }
       }
@@ -347,6 +351,7 @@ class _SessionListViewState extends State<_SessionListView> {
         .map((s) => s.name)
         .where((n) => n != oldName)
         .toList();
+    final l = AppLocalizations.of(context);
 
     final controller = TextEditingController(text: oldName);
     String? errorText;
@@ -357,16 +362,16 @@ class _SessionListViewState extends State<_SessionListView> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           backgroundColor: Colors.grey[850],
-          title: const Text(
-            'Rename Session',
-            style: TextStyle(color: Colors.white),
+          title: Text(
+            l.renameSessionTitle,
+            style: const TextStyle(color: Colors.white),
           ),
           content: TextField(
             controller: controller,
             autofocus: true,
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
-              hintText: 'New name',
+              hintText: l.newName,
               hintStyle: TextStyle(color: Colors.grey[600]),
               errorText: errorText,
               enabledBorder: const UnderlineInputBorder(
@@ -386,7 +391,7 @@ class _SessionListViewState extends State<_SessionListView> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
+              child: Text(l.cancel),
             ),
             TextButton(
               onPressed: errorText != null
@@ -404,9 +409,9 @@ class _SessionListViewState extends State<_SessionListView> {
                       Navigator.of(ctx).pop();
                       _doRename(oldName, newName);
                     },
-              child: const Text(
-                'Rename',
-                style: TextStyle(color: Colors.tealAccent),
+              child: Text(
+                l.rename,
+                style: const TextStyle(color: Colors.tealAccent),
               ),
             ),
           ],
@@ -423,7 +428,7 @@ class _SessionListViewState extends State<_SessionListView> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to rename session: $e')),
+          SnackBar(content: Text(AppLocalizations.of(context).failedToRenameSession(e.toString()))),
         );
       }
     }
@@ -445,7 +450,7 @@ class _OpenAllButton extends StatelessWidget {
       child: OutlinedButton.icon(
         onPressed: onPressed,
         icon: const Icon(Icons.open_in_new, size: 18),
-        label: Text('Open all $count sessions'),
+        label: Text(AppLocalizations.of(context).openAllSessions(count)),
         style: OutlinedButton.styleFrom(
           foregroundColor: Colors.tealAccent,
           side: BorderSide(color: Colors.tealAccent.withValues(alpha: 0.5)),
@@ -499,13 +504,13 @@ class _SessionCard extends StatelessWidget {
             ),
           ),
           subtitle: Text(
-            '${session.windowCount} window${session.windowCount == 1 ? '' : 's'}'
+            '${AppLocalizations.of(context).windowsCount(session.windowCount)}'
             ' · ${_formatDate(session.createdAt)}',
             style: TextStyle(color: Colors.grey[500], fontSize: 12),
           ),
           trailing: IconButton(
             icon: Icon(Icons.edit, color: Colors.grey[400], size: 18),
-            tooltip: 'Rename',
+            tooltip: AppLocalizations.of(context).rename,
             onPressed: onRename,
           ),
           onTap: onAttach,
@@ -541,6 +546,7 @@ class _NotInstalledView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -548,28 +554,28 @@ class _NotInstalledView extends StatelessWidget {
         children: [
           const Icon(Icons.terminal, color: Colors.grey, size: 48),
           const SizedBox(height: 16),
-          const Text(
-            'tmux is not installed',
-            style: TextStyle(
+          Text(
+            l.tmuxNotInstalled,
+            style: const TextStyle(
               color: Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Install tmux on your server:',
-            style: TextStyle(color: Colors.grey),
+          Text(
+            l.installTmuxOnServer,
+            style: const TextStyle(color: Colors.grey),
           ),
           const SizedBox(height: 12),
-          _InstallCommand(label: 'Debian/Ubuntu', cmd: 'sudo apt install tmux'),
-          _InstallCommand(label: 'macOS', cmd: 'brew install tmux'),
-          _InstallCommand(label: 'RHEL/Fedora', cmd: 'sudo dnf install tmux'),
+          _InstallCommand(label: l.distroDebianUbuntu, cmd: 'sudo apt install tmux'),
+          _InstallCommand(label: l.distroMacOS, cmd: 'brew install tmux'),
+          _InstallCommand(label: l.distroRhelFedora, cmd: 'sudo dnf install tmux'),
           const SizedBox(height: 16),
           ElevatedButton.icon(
             onPressed: onRetry,
             icon: const Icon(Icons.refresh),
-            label: const Text('Check again'),
+            label: Text(l.checkAgain),
           ),
         ],
       ),
@@ -630,9 +636,9 @@ class _ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final message = error is NetworkError
-        ? 'SSH not connected'
-        : error.toString();
+    final l = AppLocalizations.of(context);
+    final message =
+        error is NetworkError ? l.sshNotConnected : error.toString();
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -650,7 +656,7 @@ class _ErrorView extends StatelessWidget {
             ElevatedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
+              label: Text(l.retry),
             ),
           ],
         ),

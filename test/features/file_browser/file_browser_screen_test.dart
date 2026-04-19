@@ -7,6 +7,8 @@ import 'package:terminal_ssh_app/features/file_browser/file_browser_provider.dar
 import 'package:terminal_ssh_app/features/file_browser/file_browser_screen.dart';
 import 'package:terminal_ssh_app/features/terminal/terminal_connection_provider.dart';
 
+import '../../test_localizations.dart';
+
 // ---------------------------------------------------------------------------
 // Shared state variable (set before pumpWidget in each test)
 // ---------------------------------------------------------------------------
@@ -77,8 +79,8 @@ Widget _buildBrowser() {
       fileBrowserProvider.overrideWith(_FakeFileBrowserNotifier.new),
       terminalConnectionProvider.overrideWith(_FakeTerminalNotifier.new),
     ],
-    child: const MaterialApp(
-      home: Scaffold(body: FileBrowserScreen(connectionId: 'conn1')),
+    child: localizedTestApp(
+      home: const Scaffold(body: FileBrowserScreen(connectionId: 'conn1')),
     ),
   );
 }

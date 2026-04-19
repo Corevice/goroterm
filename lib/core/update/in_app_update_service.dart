@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:in_app_update/in_app_update.dart';
 
 import '../navigation/navigator_key.dart';
@@ -50,14 +51,15 @@ class InAppUpdateService {
     if (ctx == null) return;
     final messenger = ScaffoldMessenger.maybeOf(ctx);
     if (messenger == null) return;
+    final l = AppLocalizations.of(ctx);
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: const Text('アップデートの準備ができました'),
+          content: Text(l.updateReady),
           duration: const Duration(days: 1), // 永続表示（ユーザー操作で消す）
           action: SnackBarAction(
-            label: '再起動して適用',
+            label: l.restartToApply,
             onPressed: () async {
               try {
                 await InAppUpdate.completeFlexibleUpdate();

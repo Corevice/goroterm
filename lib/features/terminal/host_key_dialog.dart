@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 /// Dialog shown on first SSH connection to verify the host key fingerprint.
 class UnknownHostKeyDialog extends StatelessWidget {
@@ -14,30 +15,31 @@ class UnknownHostKeyDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return AlertDialog(
       title: Semantics(
-        label: 'Unknown host key for $host',
-        child: const Text('Verify Host Key'),
+        label: l.unknownHostKeyFor(host),
+        child: Text(l.verifyHostKey),
       ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'You are connecting to "$host" for the first time.',
+            l.firstTimeConnecting(host),
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Host key fingerprint (SHA-256):',
-            style: TextStyle(fontWeight: FontWeight.bold),
+          Text(
+            l.hostKeyFingerprint,
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
           GestureDetector(
             onTap: () {
               Clipboard.setData(ClipboardData(text: fingerprint));
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Fingerprint copied')),
+                SnackBar(content: Text(l.fingerprintCopied)),
               );
             },
             child: Container(
@@ -53,22 +55,20 @@ class UnknownHostKeyDialog extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Verify this fingerprint with the server administrator before '
-            'connecting. Accepting an incorrect fingerprint could expose '
-            'you to a man-in-the-middle attack.',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+          Text(
+            l.verifyFingerprintWarning,
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
           ),
         ],
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Reject'),
+          child: Text(l.reject),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Trust & Connect'),
+          child: Text(l.trustAndConnect),
         ),
       ],
     );
@@ -91,17 +91,18 @@ class HostKeyMismatchDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return AlertDialog(
       backgroundColor: Colors.red[900],
       title: Semantics(
-        label: 'Security warning: host key mismatch for $host',
+        label: l.hostKeyMismatchWarning(host),
         child: Row(
           children: [
             const Icon(Icons.warning_amber, color: Colors.yellow, size: 28),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'WARNING: Host Key Changed!',
+                l.hostKeyChangedTitle,
                 style: TextStyle(
                   color: Colors.yellow[200],
                   fontWeight: FontWeight.bold,
@@ -116,7 +117,7 @@ class HostKeyMismatchDialog extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'The host key for "$host" has changed!',
+            l.hostKeyChangedFor(host),
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -124,19 +125,17 @@ class HostKeyMismatchDialog extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'THIS MAY INDICATE A MAN-IN-THE-MIDDLE ATTACK. '
-            'Do NOT connect unless you know the host key has legitimately '
-            'changed (e.g., server was reinstalled).',
+            l.mitmAttackWarning,
             style: TextStyle(color: Colors.red[200], fontSize: 12),
           ),
           const SizedBox(height: 12),
           _FingerprintRow(
-            label: 'Expected (stored):',
+            label: l.expectedStored,
             fingerprint: storedFingerprint,
           ),
           const SizedBox(height: 4),
           _FingerprintRow(
-            label: 'Actual (server):',
+            label: l.actualServer,
             fingerprint: actualFingerprint,
             highlight: true,
           ),
@@ -146,12 +145,12 @@ class HostKeyMismatchDialog extends StatelessWidget {
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
           style: TextButton.styleFrom(foregroundColor: Colors.white),
-          child: const Text('Abort Connection'),
+          child: Text(l.abortConnection),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(true),
           style: TextButton.styleFrom(foregroundColor: Colors.yellow),
-          child: const Text('Trust New Key (DANGEROUS)'),
+          child: Text(l.trustNewKeyDangerous),
         ),
       ],
     );

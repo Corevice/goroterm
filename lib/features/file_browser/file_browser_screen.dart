@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
@@ -54,6 +55,7 @@ class _Header extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncState = ref.watch(fileBrowserProvider(connectionId));
     final state = asyncState.valueOrNull;
+    final l = AppLocalizations.of(context);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -65,10 +67,10 @@ class _Header extends ConsumerWidget {
             children: [
               const Icon(Icons.folder_open, color: Colors.amber, size: 20),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'File Browser',
-                  style: TextStyle(
+                  l.fileBrowser,
+                  style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
                   ),
@@ -83,7 +85,8 @@ class _Header extends ConsumerWidget {
                     color: Colors.grey[400],
                     size: 20,
                   ),
-                  tooltip: state.showHidden ? 'Hide dotfiles' : 'Show dotfiles',
+                  tooltip:
+                      state.showHidden ? l.hideDotfiles : l.showDotfiles,
                   onPressed: () =>
                       ref.read(fileBrowserProvider(connectionId).notifier)
                           .toggleHidden(),
@@ -91,12 +94,12 @@ class _Header extends ConsumerWidget {
                 IconButton(
                   icon: Icon(Icons.upload_file,
                       color: Colors.grey[400], size: 20),
-                  tooltip: 'Upload file',
+                  tooltip: l.uploadFile,
                   onPressed: () => _pickAndUploadFile(context, ref),
                 ),
                 IconButton(
                   icon: Icon(Icons.refresh, color: Colors.grey[400], size: 20),
-                  tooltip: 'Refresh',
+                  tooltip: l.refresh,
                   onPressed: () =>
                       ref.read(fileBrowserProvider(connectionId).notifier)
                           .refresh(),
@@ -129,7 +132,7 @@ class _Header extends ConsumerWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload failed: $e')),
+          SnackBar(content: Text(AppLocalizations.of(context).uploadFailed(e.toString()))),
         );
       }
     }
@@ -151,6 +154,7 @@ class _BrowserBody extends ConsumerWidget {
     final connectionState =
         ref.read(terminalConnectionProvider(connectionId));
     final terminal = connectionState.terminal;
+    final l = AppLocalizations.of(context);
 
     final downloading = state.downloadProgress != null;
     final downloaded = state.downloadedFilePath != null;
@@ -171,14 +175,14 @@ class _BrowserBody extends ConsumerWidget {
           MaterialBanner(
             backgroundColor: Colors.green[900],
             content: Text(
-              'ダウンロード完了: ${p.basename(state.downloadedFilePath!)}',
+              l.downloadCompleted(p.basename(state.downloadedFilePath!)),
               style: const TextStyle(color: Colors.white, fontSize: 12),
               overflow: TextOverflow.ellipsis,
             ),
             actions: [
               TextButton(
                 onPressed: notifier.clearDownloadNotification,
-                child: const Text('OK', style: TextStyle(color: Colors.white)),
+                child: Text(l.ok, style: const TextStyle(color: Colors.white)),
               ),
             ],
           ),
@@ -186,14 +190,14 @@ class _BrowserBody extends ConsumerWidget {
           MaterialBanner(
             backgroundColor: Colors.red[900],
             content: Text(
-              'ダウンロードエラー: ${state.downloadError!}',
+              l.downloadError(state.downloadError!),
               style: const TextStyle(color: Colors.white, fontSize: 12),
               overflow: TextOverflow.ellipsis,
             ),
             actions: [
               TextButton(
                 onPressed: notifier.clearDownloadError,
-                child: const Text('OK', style: TextStyle(color: Colors.white)),
+                child: Text(l.ok, style: const TextStyle(color: Colors.white)),
               ),
             ],
           ),
@@ -204,7 +208,7 @@ class _BrowserBody extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Uploading... ${(state.uploadProgress! * 100).toStringAsFixed(0)}%',
+                  l.uploadingPercent((state.uploadProgress! * 100).round()),
                   style: TextStyle(color: Colors.grey[400], fontSize: 12),
                 ),
                 const SizedBox(height: 4),
@@ -220,14 +224,14 @@ class _BrowserBody extends ConsumerWidget {
           MaterialBanner(
             backgroundColor: Colors.teal[900],
             content: Text(
-              'アップロード完了: ${state.uploadCompleteFile}',
+              l.uploadCompleted(state.uploadCompleteFile!),
               style: const TextStyle(color: Colors.white, fontSize: 12),
               overflow: TextOverflow.ellipsis,
             ),
             actions: [
               TextButton(
                 onPressed: notifier.clearUploadNotification,
-                child: const Text('OK', style: TextStyle(color: Colors.white)),
+                child: Text(l.ok, style: const TextStyle(color: Colors.white)),
               ),
             ],
           ),
@@ -240,10 +244,10 @@ class _BrowserBody extends ConsumerWidget {
           ),
         Expanded(
           child: visibleItems.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(
-                    'Empty directory',
-                    style: TextStyle(color: Colors.grey),
+                    l.emptyDirectory,
+                    style: const TextStyle(color: Colors.grey),
                   ),
                 )
               : ListView.builder(
@@ -295,12 +299,13 @@ class _BrowserBody extends ConsumerWidget {
     String path,
     bool isDir,
   ) async {
+    final l = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.grey[900],
         title: Text(
-          'Delete ${isDir ? "directory" : "file"}?',
+          isDir ? l.deleteDirectoryConfirm : l.deleteFileConfirm,
           style: const TextStyle(color: Colors.white),
         ),
         content: Text(
@@ -310,11 +315,11 @@ class _BrowserBody extends ConsumerWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+            child: Text(l.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: Text(l.delete, style: const TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -327,7 +332,7 @@ class _BrowserBody extends ConsumerWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Delete failed: $e')),
+          SnackBar(content: Text(AppLocalizations.of(context).deleteFailed(e.toString()))),
         );
       }
     }
@@ -339,32 +344,33 @@ class _BrowserBody extends ConsumerWidget {
     String oldPath,
     String currentName,
   ) async {
+    final l = AppLocalizations.of(context);
     final controller = TextEditingController(text: currentName);
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.grey[900],
-        title: const Text(
-          'Rename',
-          style: TextStyle(color: Colors.white),
+        title: Text(
+          l.rename,
+          style: const TextStyle(color: Colors.white),
         ),
         content: TextField(
           controller: controller,
           autofocus: true,
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
-            hintText: 'New name',
+            hintText: l.newName,
             hintStyle: TextStyle(color: Colors.grey[600]),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
+            child: Text(l.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-            child: const Text('Rename'),
+            child: Text(l.rename),
           ),
         ],
       ),
@@ -381,7 +387,7 @@ class _BrowserBody extends ConsumerWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Rename failed: $e')),
+          SnackBar(content: Text(AppLocalizations.of(context).renameFailed(e.toString()))),
         );
       }
     }
@@ -396,10 +402,11 @@ class _ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final message = error is NetworkError
-        ? 'SSH not connected'
+        ? l.sshNotConnected
         : error is PermissionError
-            ? 'Permission denied'
+            ? l.permissionDenied
             : error.toString();
     return Center(
       child: Padding(
@@ -418,7 +425,7 @@ class _ErrorView extends StatelessWidget {
             ElevatedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
+              label: Text(l.retry),
             ),
           ],
         ),

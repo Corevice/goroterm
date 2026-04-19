@@ -5,6 +5,8 @@ import 'package:terminal_ssh_app/core/storage/database.dart';
 import 'package:terminal_ssh_app/features/connections/connection_list_screen.dart';
 import 'package:terminal_ssh_app/features/connections/connection_provider.dart';
 
+import '../../test_localizations.dart';
+
 // ---------------------------------------------------------------------------
 // Fakes
 // ---------------------------------------------------------------------------
@@ -42,7 +44,7 @@ class _FakeWithConnections extends ConnectionListNotifier {
 }
 
 Widget _buildApp({required Widget home}) {
-  return MaterialApp(home: home);
+  return localizedTestApp(home: home);
 }
 
 // ---------------------------------------------------------------------------

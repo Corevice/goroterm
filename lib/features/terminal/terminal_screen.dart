@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:xterm/xterm.dart';
@@ -98,11 +99,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
 
   void _showFontSizeIndicator() {
     final size = ref.read(fontSizeProvider);
+    final l = AppLocalizations.of(context);
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text('Font size: ${size.toInt()}'),
+          content: Text(l.fontSizeIndicator(size.toInt())),
           duration: const Duration(seconds: 1),
           behavior: SnackBarBehavior.floating,
         ),
@@ -173,6 +175,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   Future<void> _showConnectionPicker(BuildContext context, WidgetRef ref) async {
     final connections = await ref.read(connectionListProvider.future);
     if (!context.mounted || connections.isEmpty) return;
+    final l = AppLocalizations.of(context);
 
     final selected = await showModalBottomSheet<Connection>(
       context: context,
@@ -181,11 +184,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
+            Padding(
+              padding: const EdgeInsets.all(16),
               child: Text(
-                'Select connection',
-                style: TextStyle(
+                l.selectConnection,
+                style: const TextStyle(
                     color: Colors.white,
                     fontSize: 16,
                     fontWeight: FontWeight.bold),
@@ -229,11 +232,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       (prev, next) {
         if (next && !(prev ?? false)) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(
-                'バッテリー最適化が有効です。バックグラウンドでSSH接続が切れる可能性があります。',
+                AppLocalizations.of(context).batteryOptimizationWarning,
               ),
-              duration: Duration(seconds: 5),
+              duration: const Duration(seconds: 5),
             ),
           );
         }
@@ -257,6 +260,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
 
     final activeConnectionState =
         ref.watch(terminalConnectionProvider(activeSession.sessionId));
+    final l = AppLocalizations.of(context);
 
     return Scaffold(
       key: _scaffoldKey,
@@ -308,7 +312,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         backgroundColor: Colors.grey[900],
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          tooltip: 'Back to connections',
+          tooltip: l.backToConnections,
           onPressed: () {
             if (Navigator.of(context).canPop()) {
               Navigator.of(context).pop();
@@ -329,20 +333,20 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           Builder(
             builder: (context) => IconButton(
               icon: const Icon(Icons.folder_open),
-              tooltip: 'File Browser',
+              tooltip: l.fileBrowser,
               onPressed: () => Scaffold.of(context).openDrawer(),
             ),
           ),
           Builder(
             builder: (context) => IconButton(
               icon: const Icon(Icons.view_list),
-              tooltip: 'tmux Sessions',
+              tooltip: l.tmuxSessions,
               onPressed: () => Scaffold.of(context).openEndDrawer(),
             ),
           ),
           IconButton(
             icon: const Icon(Icons.add),
-            tooltip: 'New terminal tab',
+            tooltip: l.newTerminalTab,
             onPressed: () => _showConnectionPicker(context, ref),
           ),
           PopupMenuButton<String>(
@@ -364,33 +368,33 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
               }
             },
             itemBuilder: (_) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'refresh_screen',
                 child: Row(
                   children: [
-                    Icon(Icons.refresh, size: 20),
-                    SizedBox(width: 12),
-                    Text('Refresh Screen'),
+                    const Icon(Icons.refresh, size: 20),
+                    const SizedBox(width: 12),
+                    Text(l.refreshScreen),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'server_monitor',
                 child: Row(
                   children: [
-                    Icon(Icons.monitor_heart_outlined, size: 20),
-                    SizedBox(width: 12),
-                    Text('Server Monitor'),
+                    const Icon(Icons.monitor_heart_outlined, size: 20),
+                    const SizedBox(width: 12),
+                    Text(l.serverMonitor),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'claude_usage',
                 child: Row(
                   children: [
-                    Icon(Icons.analytics_outlined, size: 20),
-                    SizedBox(width: 12),
-                    Text('Claude Code Usage'),
+                    const Icon(Icons.analytics_outlined, size: 20),
+                    const SizedBox(width: 12),
+                    Text(l.claudeCodeUsage),
                   ],
                 ),
               ),
@@ -915,7 +919,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
 
     if (!_speechAvailable) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Speech recognition not available')),
+        SnackBar(content: Text(AppLocalizations.of(context).speechRecognitionNotAvailable)),
       );
       return;
     }
@@ -1115,7 +1119,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-                'File too large (max ${isVideo ? "100MB" : "10MB"})'),
+                AppLocalizations.of(context).fileTooLarge(isVideo ? '100MB' : '10MB')),
           ),
         );
       }
@@ -1128,7 +1132,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     if (channelManager == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('SSH not connected')),
+          SnackBar(content: Text(AppLocalizations.of(context).sshNotConnected)),
         );
       }
       return;
@@ -1138,11 +1142,12 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     final ts = _timestamp();
 
     if (mounted) {
+      final l = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(isVideo
-              ? 'Uploading & converting: $fileName'
-              : 'Uploading: $fileName'),
+              ? l.uploadingAndConverting(fileName)
+              : l.uploadingFile(fileName)),
           duration: const Duration(seconds: 30),
         ),
       );
@@ -1172,9 +1177,9 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
           ScaffoldMessenger.of(context)
             ..hideCurrentSnackBar()
             ..showSnackBar(
-              const SnackBar(
-                content: Text('Converting to GIF...'),
-                duration: Duration(seconds: 60),
+              SnackBar(
+                content: Text(AppLocalizations.of(context).convertingToGif),
+                duration: const Duration(seconds: 60),
               ),
             );
         }
@@ -1194,8 +1199,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
               ..showSnackBar(
                 SnackBar(
                   content: Text(
-                      'GIF conversion failed (ffmpeg not found?). '
-                      'Video uploaded as: $remotePath'),
+                      AppLocalizations.of(context).gifConversionFailed(remotePath)),
                   duration: const Duration(seconds: 5),
                 ),
               );
@@ -1207,7 +1211,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
-            SnackBar(content: Text('Ready: $pastePath')),
+            SnackBar(content: Text(AppLocalizations.of(context).ready(pastePath))),
           );
 
         // パスをターミナルに自動ペースト（再接続で terminal が変わっている可能性があるため最新を取得）
@@ -1218,7 +1222,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
-            SnackBar(content: Text('Upload failed: $e')),
+            SnackBar(content: Text(AppLocalizations.of(context).uploadFailed(e.toString()))),
           );
       }
     } finally {
@@ -1254,7 +1258,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     if (channelManager == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('SSH not connected')),
+          SnackBar(content: Text(AppLocalizations.of(context).sshNotConnected)),
         );
       }
       return;
@@ -1265,7 +1269,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Uploading: $fileName'),
+          content: Text(AppLocalizations.of(context).uploadingFile(fileName)),
           duration: const Duration(seconds: 30),
         ),
       );
@@ -1290,7 +1294,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
-            SnackBar(content: Text('Ready: $remotePath')),
+            SnackBar(content: Text(AppLocalizations.of(context).ready(remotePath))),
           );
         connectionState.terminal?.paste(remotePath);
       }
@@ -1299,7 +1303,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
-            SnackBar(content: Text('Upload failed: $e')),
+            SnackBar(content: Text(AppLocalizations.of(context).uploadFailed(e.toString()))),
           );
       }
     } finally {
@@ -1383,7 +1387,8 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    connectionState.errorMessage ?? 'Connection lost',
+                    connectionState.errorMessage ??
+                        AppLocalizations.of(context).connectionLost,
                   ),
                 ),
               ],
@@ -1394,7 +1399,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
                 onPressed: () => ref
                     .read(terminalConnectionProvider(widget.sessionId).notifier)
                     .reconnect(),
-                child: const Text('Reconnect Now'),
+                child: Text(AppLocalizations.of(context).reconnectNow),
               ),
             ],
           ),

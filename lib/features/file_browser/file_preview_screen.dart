@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'file_browser_provider.dart';
@@ -71,15 +72,16 @@ class _FilePreviewScreenState extends ConsumerState<FilePreviewScreen> {
     await Clipboard.setData(ClipboardData(text: _content!));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Content copied to clipboard'),
-        duration: Duration(seconds: 2),
+      SnackBar(
+        content: Text(AppLocalizations.of(context).contentCopiedToClipboard),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: const Color(0xFF1E1E1E),
       appBar: AppBar(
@@ -92,13 +94,13 @@ class _FilePreviewScreenState extends ConsumerState<FilePreviewScreen> {
           if (_content != null)
             IconButton(
               icon: const Icon(Icons.copy),
-              tooltip: 'Copy content',
+              tooltip: l.copyContent,
               onPressed: _copyContent,
             ),
           if (!_loading)
             IconButton(
               icon: const Icon(Icons.refresh),
-              tooltip: 'Reload',
+              tooltip: l.reload,
               onPressed: () {
                 setState(() {
                   _loading = true;
@@ -144,9 +146,9 @@ class _FilePreviewScreenState extends ConsumerState<FilePreviewScreen> {
             width: double.infinity,
             color: Colors.orange[900],
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            child: const Text(
-              'File truncated at 1 MB',
-              style: TextStyle(color: Colors.white, fontSize: 12),
+            child: Text(
+              AppLocalizations.of(context).fileTruncatedAt1MB,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
             ),
           ),
         Expanded(

@@ -11,6 +11,8 @@ import 'package:terminal_ssh_app/core/ssh/ssh_channel_manager.dart';
 import 'package:terminal_ssh_app/features/claude_usage/claude_usage_dialog.dart';
 import 'package:terminal_ssh_app/features/terminal/terminal_connection_provider.dart';
 
+import '../../test_localizations.dart';
+
 // ---------------------------------------------------------------------------
 // Mock / Fake helpers
 // ---------------------------------------------------------------------------
@@ -99,8 +101,8 @@ Widget buildTestWidget({SshChannelManager? channelManager}) {
         () => FakeTerminalConnectionNotifier(channelManager),
       ),
     ],
-    child: const MaterialApp(
-      home: Scaffold(body: SizedBox.shrink()),
+    child: localizedTestApp(
+      home: const Scaffold(body: SizedBox.shrink()),
     ),
   );
 }

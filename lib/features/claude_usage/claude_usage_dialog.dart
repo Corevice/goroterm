@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ssh/ssh_channel_manager.dart';
@@ -173,10 +174,10 @@ print(json.dumps(result))
                 const Icon(Icons.analytics_outlined,
                     color: Colors.white70, size: 24),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Claude Code Usage',
-                    style: TextStyle(
+                    AppLocalizations.of(context).claudeCodeUsage,
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -187,7 +188,7 @@ print(json.dumps(result))
                   IconButton(
                     icon: const Icon(Icons.refresh, color: Colors.white70),
                     onPressed: _fetchUsage,
-                    tooltip: 'Refresh',
+                    tooltip: AppLocalizations.of(context).refresh,
                   ),
               ],
             ),
@@ -234,6 +235,7 @@ print(json.dumps(result))
 
   Widget _buildUsageContent() {
     final usage = _usage!;
+    final l = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -245,7 +247,7 @@ print(json.dumps(result))
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
-            'Plan: ${_formatSubscription(usage.subscription)}',
+            l.planLabel(_formatSubscription(usage.subscription)),
             style: const TextStyle(color: Colors.white70, fontSize: 13),
           ),
         ),
@@ -254,7 +256,7 @@ print(json.dumps(result))
         // 5時間リミット
         if (usage.fiveHour != null)
           _buildUsageBar(
-            label: '5-Hour Limit',
+            label: l.limit5Hour,
             utilization: usage.fiveHour!.utilization,
             resetsAt: usage.fiveHour!.resetsAt,
             color: _getBarColor(usage.fiveHour!.utilization),
@@ -264,7 +266,7 @@ print(json.dumps(result))
         // 7日間リミット（総合）
         if (usage.sevenDay != null)
           _buildUsageBar(
-            label: '7-Day Limit',
+            label: l.limit7Day,
             utilization: usage.sevenDay!.utilization,
             resetsAt: usage.sevenDay!.resetsAt,
             color: _getBarColor(usage.sevenDay!.utilization),
@@ -275,7 +277,7 @@ print(json.dumps(result))
         if (usage.sevenDayOpus != null &&
             usage.sevenDayOpus!.utilization > 0) ...[
           _buildUsageBar(
-            label: '7-Day Opus',
+            label: l.limit7DayOpus,
             utilization: usage.sevenDayOpus!.utilization,
             resetsAt: usage.sevenDayOpus!.resetsAt,
             color: _getBarColor(usage.sevenDayOpus!.utilization),
@@ -287,7 +289,7 @@ print(json.dumps(result))
         if (usage.sevenDaySonnet != null &&
             usage.sevenDaySonnet!.utilization > 0)
           _buildUsageBar(
-            label: '7-Day Sonnet',
+            label: l.limit7DaySonnet,
             utilization: usage.sevenDaySonnet!.utilization,
             resetsAt: usage.sevenDaySonnet!.resetsAt,
             color: _getBarColor(usage.sevenDaySonnet!.utilization),
@@ -297,7 +299,7 @@ print(json.dumps(result))
         if (usage.extraUsageEnabled == true) ...[
           const SizedBox(height: 12),
           _buildUsageBar(
-            label: 'Extra Usage',
+            label: l.extraUsage,
             utilization: usage.extraUsageUtilization ?? 0,
             resetsAt: null,
             color: Colors.purple,
@@ -330,7 +332,7 @@ print(json.dumps(result))
                 style:
                     const TextStyle(color: Colors.white, fontSize: 14)),
             Text(
-              '${remaining.toStringAsFixed(1)}% remaining',
+              AppLocalizations.of(context).remainingPercent(remaining.toStringAsFixed(1)),
               style: TextStyle(
                 color: remaining < 20 ? Colors.redAccent : Colors.white70,
                 fontSize: 13,
@@ -354,7 +356,7 @@ print(json.dumps(result))
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              subtitle ?? 'Resets $resetText',
+              subtitle ?? AppLocalizations.of(context).resetsAt(resetText!),
               style:
                   const TextStyle(color: Colors.white38, fontSize: 11),
             ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/preferences/power_settings.dart';
@@ -14,38 +15,39 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final fontSize = ref.watch(fontSizeProvider);
+    final l = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
         title: Semantics(
           header: true,
-          child: const Text('Settings'),
+          child: Text(l.settings),
         ),
       ),
       body: ListView(
         children: [
           // Theme section
-          const _SectionHeader(title: 'Appearance'),
+          _SectionHeader(title: l.appearance),
           Semantics(
-            label: 'Theme selection',
+            label: l.themeSelection,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: SegmentedButton<AppThemeMode>(
-                segments: const [
+                segments: [
                   ButtonSegment(
                     value: AppThemeMode.dark,
-                    label: Text('Dark'),
-                    icon: Icon(Icons.dark_mode),
+                    label: Text(l.themeDark),
+                    icon: const Icon(Icons.dark_mode),
                   ),
                   ButtonSegment(
                     value: AppThemeMode.light,
-                    label: Text('Light'),
-                    icon: Icon(Icons.light_mode),
+                    label: Text(l.themeLight),
+                    icon: const Icon(Icons.light_mode),
                   ),
                   ButtonSegment(
                     value: AppThemeMode.highContrast,
-                    label: Text('High Contrast'),
-                    icon: Icon(Icons.contrast),
+                    label: Text(l.themeHighContrast),
+                    icon: const Icon(Icons.contrast),
                   ),
                 ],
                 selected: {themeMode},
@@ -59,7 +61,7 @@ class SettingsScreen extends ConsumerWidget {
           ),
 
           // Font size section
-          const _SectionHeader(title: 'Terminal Font Size'),
+          _SectionHeader(title: l.terminalFontSize),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Column(
@@ -67,26 +69,26 @@ class SettingsScreen extends ConsumerWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Size'),
+                    Text(l.size),
                     Semantics(
-                      label: 'Font size: ${fontSize.round()} pt',
+                      label: l.fontSizePt(fontSize.round()),
                       child: Text(
-                        '${fontSize.round()} pt',
+                        l.fontSizePt(fontSize.round()),
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
                   ],
                 ),
                 Semantics(
-                  label: 'Terminal font size slider',
+                  label: l.terminalFontSizeSlider,
                   slider: true,
-                  value: '${fontSize.round()} pt',
+                  value: l.fontSizePt(fontSize.round()),
                   child: Slider(
                     value: fontSize,
                     min: 8.0,
                     max: 32.0,
                     divisions: 12,
-                    label: '${fontSize.round()} pt',
+                    label: l.fontSizePt(fontSize.round()),
                     onChanged: (value) {
                       ref.read(fontSizeProvider.notifier).setFontSize(value);
                     },
@@ -99,17 +101,17 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(),
 
           // Power section
-          const _SectionHeader(title: 'Battery Saving'),
+          _SectionHeader(title: l.batterySaving),
           const _PowerSettingsTile(),
 
           const Divider(),
 
           // Diagnostics section
-          const _SectionHeader(title: 'Diagnostics'),
+          _SectionHeader(title: l.diagnostics),
           ListTile(
             leading: const Icon(Icons.bug_report_outlined),
-            title: const Text('Connection Log'),
-            subtitle: const Text('View SSH connection diagnostics'),
+            title: Text(l.connectionLog),
+            subtitle: Text(l.viewSshDiagnostics),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.of(context).push(
@@ -123,13 +125,13 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(),
 
           // About section
-          const _SectionHeader(title: 'About'),
+          _SectionHeader(title: l.about),
           Semantics(
             button: true,
-            label: 'Open source licenses',
+            label: l.openSourceLicensesLabel,
             child: ListTile(
               leading: const Icon(Icons.article_outlined),
-              title: const Text('Open Source Licenses'),
+              title: Text(l.openSourceLicenses),
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 showLicensePage(
@@ -142,10 +144,10 @@ class SettingsScreen extends ConsumerWidget {
           ),
           Semantics(
             button: true,
-            label: 'Privacy policy',
+            label: l.privacyPolicyLabel,
             child: ListTile(
               leading: const Icon(Icons.privacy_tip_outlined),
-              title: const Text('Privacy Policy'),
+              title: Text(l.privacyPolicy),
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 Navigator.of(context).push(
@@ -158,7 +160,7 @@ class SettingsScreen extends ConsumerWidget {
           ),
           ListTile(
             leading: const Icon(Icons.info_outline),
-            title: const Text('Version'),
+            title: Text(l.version),
             trailing: const Text('1.0.0'),
           ),
         ],
@@ -177,20 +179,20 @@ class _PowerSettingsTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tick = ref.watch(tickIntervalProvider);
     final tcp = ref.watch(tcpKeepaliveIdleProvider);
+    final l = AppLocalizations.of(context);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Background health check (foreground service tick)
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Background health check',
-                  style: TextStyle(fontWeight: FontWeight.w500),
+                  l.backgroundHealthCheck,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
                 ),
               ),
               DropdownButton<int>(
@@ -208,20 +210,19 @@ class _PowerSettingsTile extends ConsumerWidget {
             ],
           ),
           Text(
-            '間隔が長いほど省電力。バックグラウンドの SSH 接続死活確認の頻度。',
+            l.backgroundHealthCheckHelp,
             style: Theme.of(context).textTheme.bodySmall,
           ),
 
           const SizedBox(height: 16),
 
-          // TCP keepalive idle
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'TCP keepalive interval',
-                  style: TextStyle(fontWeight: FontWeight.w500),
+                  l.tcpKeepaliveInterval,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
                 ),
               ),
               DropdownButton<int>(
@@ -239,13 +240,13 @@ class _PowerSettingsTile extends ConsumerWidget {
             ],
           ),
           Text(
-            '間隔が長いほど省電力。短いほど切断検知が早いが NAT が短い回線（公衆 WiFi 等）では切断されやすい。',
+            l.tcpKeepaliveHelp,
             style: Theme.of(context).textTheme.bodySmall,
           ),
 
           const SizedBox(height: 8),
           Text(
-            '※ 変更はアプリ再起動 / 次回接続時から反映されます。',
+            l.settingsApplyOnRestart,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   fontStyle: FontStyle.italic,
                 ),
@@ -283,11 +284,12 @@ class PrivacyPolicyScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
         title: Semantics(
           header: true,
-          child: const Text('Privacy Policy'),
+          child: Text(l.privacyPolicy),
         ),
       ),
       body: const SingleChildScrollView(
@@ -304,66 +306,40 @@ class _PrivacyPolicyContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = Theme.of(context).textTheme;
+    final l = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Privacy Policy', style: style.headlineSmall),
+        Text(l.privacyPolicy, style: style.headlineSmall),
         const SizedBox(height: 8),
         Text(
-          'Last updated: March 2026',
+          l.privacyLastUpdated,
           style: style.bodySmall,
         ),
         const SizedBox(height: 16),
         _Section(
-          title: 'Data We Handle',
-          body:
-              'SSH Terminal handles the following sensitive data on your behalf:\n\n'
-              '• SSH private keys and passphrases\n'
-              '• SSH passwords (optional)\n'
-              '• Known host fingerprints\n'
-              '• SSH connection details (host, port, username)\n'
-              '• Remote file paths accessed via SFTP',
+          title: l.privacyDataWeHandle,
+          body: l.privacyDataWeHandleBody,
         ),
         _Section(
-          title: 'Data Storage',
-          body:
-              'All data is stored exclusively on your device:\n\n'
-              '• SSH credentials are stored in the device\'s secure storage '
-              '(iOS Keychain / Android EncryptedSharedPreferences).\n'
-              '• Connection configurations are stored in a local SQLite '
-              'database within the app\'s private sandbox.\n'
-              '• No data is transmitted to external servers or third parties.\n'
-              '• No analytics, telemetry, or crash data is collected.',
+          title: l.privacyDataStorage,
+          body: l.privacyDataStorageBody,
         ),
         _Section(
-          title: 'Data We Do NOT Collect',
-          body:
-              'SSH Terminal does NOT:\n\n'
-              '• Send any data to Anthropic or any third party\n'
-              '• Collect usage analytics\n'
-              '• Store SSH session content (commands or output)\n'
-              '• Access files outside the app\'s sandbox',
+          title: l.privacyDataNotCollect,
+          body: l.privacyDataNotCollectBody,
         ),
         _Section(
-          title: 'Permissions',
-          body:
-              '• Network access: Required to connect to SSH servers.\n'
-              '• Storage (Android): Required only to save downloaded files '
-              'to the device\'s Downloads folder.',
+          title: l.privacyPermissions,
+          body: l.privacyPermissionsBody,
         ),
         _Section(
-          title: 'Security',
-          body:
-              'We use platform-provided secure storage (iOS Keychain / '
-              'Android Keystore) to protect your credentials. '
-              'Host key verification is performed on every connection '
-              'to protect against man-in-the-middle attacks.',
+          title: l.privacySecurity,
+          body: l.privacySecurityBody,
         ),
         _Section(
-          title: 'Contact',
-          body:
-              'If you have questions about this privacy policy, please '
-              'open an issue on the project\'s GitHub repository.',
+          title: l.privacyContact,
+          body: l.privacyContactBody,
         ),
       ],
     );
@@ -411,47 +387,48 @@ class _ConnectionLogScreenState extends State<ConnectionLogScreen> {
   Widget build(BuildContext context) {
     final logger = AppLogger.instance;
     final entries = logger.entries;
+    final l = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Connection Log'),
+        title: Text(l.connectionLog),
         actions: [
           IconButton(
             icon: const Icon(Icons.copy),
-            tooltip: 'Copy all logs',
+            tooltip: l.copyAllLogs,
             onPressed: () {
               final text = logger.toText();
               if (text.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('No logs to copy')),
+                  SnackBar(content: Text(l.noLogsToCopy)),
                 );
                 return;
               }
               Clipboard.setData(ClipboardData(text: text));
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('Copied ${entries.length} log entries'),
+                  content: Text(l.copiedLogEntries(entries.length)),
                 ),
               );
             },
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
-            tooltip: 'Clear logs',
+            tooltip: l.clearLogs,
             onPressed: () {
               logger.clear();
               setState(() {});
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Logs cleared')),
+                SnackBar(content: Text(l.logsCleared)),
               );
             },
           ),
         ],
       ),
       body: entries.isEmpty
-          ? const Center(
+          ? Center(
               child: Text(
-                'No logs yet.\nConnect to an SSH server to see diagnostics.',
+                l.noLogsYet,
                 textAlign: TextAlign.center,
               ),
             )

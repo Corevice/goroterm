@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/storage/database.dart';
@@ -40,6 +41,7 @@ class _ConnectionListScreenState extends ConsumerState<ConnectionListScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final connectionsAsync = ref.watch(connectionListProvider);
     final activeSessions = ref.watch(
       sessionManagerProvider.select((s) => s.sessions.length),
@@ -49,15 +51,15 @@ class _ConnectionListScreenState extends ConsumerState<ConnectionListScreen>
       appBar: AppBar(
         title: Semantics(
           header: true,
-          child: const Text('SSH Connections'),
+          child: Text(l.sshConnections),
         ),
         actions: [
           Semantics(
             button: true,
-            label: 'Settings',
+            label: l.settings,
             child: IconButton(
               icon: const Icon(Icons.settings),
-              tooltip: 'Settings',
+              tooltip: l.settings,
               onPressed: () => Navigator.of(context).pushNamed('/settings'),
             ),
           ),
@@ -73,11 +75,11 @@ class _ConnectionListScreenState extends ConsumerState<ConnectionListScreen>
                       Icon(Icons.terminal, size: 64, color: Colors.grey[600]),
                       const SizedBox(height: 16),
                       Text(
-                        'No connections yet',
+                        l.noConnectionsYet,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 8),
-                      const Text('Tap + to add a new SSH connection'),
+                      Text(l.tapPlusToAddConnection),
                     ],
                   ),
                 )
@@ -99,16 +101,16 @@ class _ConnectionListScreenState extends ConsumerState<ConnectionListScreen>
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(child: Text('Error: $error')),
+        error: (error, _) => Center(child: Text(l.errorPrefix(error.toString()))),
       ),
       floatingActionButton: Semantics(
         button: true,
-        label: 'Add new SSH connection',
+        label: l.addNewSshConnection,
         child: FloatingActionButton(
           onPressed: () {
             Navigator.of(context).pushNamed('/connection/edit');
           },
-          tooltip: 'Add connection',
+          tooltip: l.addConnection,
           child: const Icon(Icons.add),
         ),
       ),
@@ -123,8 +125,7 @@ class _ResumeTerminalBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label =
-        'Resume terminal ($tabCount tab${tabCount == 1 ? '' : 's'})';
+    final l = AppLocalizations.of(context);
     return Material(
       color: Theme.of(context).colorScheme.primaryContainer,
       child: InkWell(
@@ -137,7 +138,7 @@ class _ResumeTerminalBanner extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  label,
+                  l.resumeTerminalTabs(tabCount),
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
               ),
@@ -157,6 +158,7 @@ class _ConnectionTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: Theme.of(context).colorScheme.primaryContainer,
@@ -186,7 +188,7 @@ class _ConnectionTile extends ConsumerWidget {
               children: [
                 ListTile(
                   leading: const Icon(Icons.edit),
-                  title: const Text('Edit'),
+                  title: Text(l.edit),
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.of(context).pushNamed(
@@ -197,7 +199,7 @@ class _ConnectionTile extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.delete, color: Colors.red),
                   title:
-                      const Text('Delete', style: TextStyle(color: Colors.red)),
+                      Text(l.delete, style: const TextStyle(color: Colors.red)),
                   onTap: () {
                     Navigator.pop(context);
                     _confirmDelete(context, ref);
@@ -212,17 +214,20 @@ class _ConnectionTile extends ConsumerWidget {
   }
 
   void _confirmDelete(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Connection'),
+        title: Text(l.deleteConnection),
         content: Text(
-          'Delete "${connection.label.isNotEmpty ? connection.label : connection.host}"?',
+          l.deleteConnectionConfirm(
+            connection.label.isNotEmpty ? connection.label : connection.host,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(l.cancel),
           ),
           TextButton(
             onPressed: () {
@@ -232,7 +237,7 @@ class _ConnectionTile extends ConsumerWidget {
               Navigator.pop(context);
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
+            child: Text(l.delete),
           ),
         ],
       ),

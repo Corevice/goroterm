@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/navigation/navigator_key.dart';
@@ -41,6 +42,8 @@ class TerminalSshApp extends ConsumerWidget {
       theme: theme,
       darkTheme: darkTheme,
       themeMode: materialThemeMode,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       initialRoute: '/',
       onGenerateRoute: _onGenerateRoute,
     );

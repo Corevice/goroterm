@@ -7,6 +7,8 @@ import 'package:terminal_ssh_app/features/tmux/tmux_provider.dart';
 import 'package:terminal_ssh_app/features/tmux/tmux_session_model.dart';
 import 'package:terminal_ssh_app/features/terminal/terminal_connection_provider.dart';
 
+import '../../test_localizations.dart';
+
 // ---------------------------------------------------------------------------
 // Shared state variable
 // ---------------------------------------------------------------------------
@@ -55,8 +57,8 @@ Widget _buildScreen() {
       tmuxProvider.overrideWith(_FakeTmuxNotifier.new),
       terminalConnectionProvider.overrideWith(_FakeTerminalNotifier.new),
     ],
-    child: const MaterialApp(
-      home: Scaffold(
+    child: localizedTestApp(
+      home: const Scaffold(
         body: TmuxManagerScreen(connectionId: 'conn1'),
       ),
     ),

@@ -10,6 +10,8 @@ import 'package:terminal_ssh_app/features/terminal/terminal_connection_provider.
 import 'package:terminal_ssh_app/features/terminal/terminal_screen.dart';
 import 'package:terminal_ssh_app/features/terminal/session_manager.dart';
 
+import '../../test_localizations.dart';
+
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
@@ -89,9 +91,7 @@ Widget _buildScreen(TerminalConnectionNotifier Function() notifierFactory) {
       terminalConnectionProvider.overrideWith(notifierFactory),
       connectionRepositoryProvider.overrideWithValue(mockRepo),
     ],
-    child: const MaterialApp(
-      home: TerminalScreen(),
-    ),
+    child: localizedTestApp(home: const TerminalScreen()),
   );
 }
 

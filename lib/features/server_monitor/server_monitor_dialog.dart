@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ssh/ssh_channel_manager.dart';
@@ -140,10 +141,10 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
                   const Icon(Icons.monitor_heart_outlined,
                       color: Colors.white70, size: 24),
                   const SizedBox(width: 12),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Server Monitor',
-                      style: TextStyle(
+                      AppLocalizations.of(context).serverMonitor,
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -157,7 +158,7 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
                         setState(() => _loading = true);
                         _fetchInfo();
                       },
-                      tooltip: 'Refresh',
+                      tooltip: AppLocalizations.of(context).refresh,
                     ),
                 ],
               ),
@@ -208,19 +209,20 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
 
   Widget _buildContent() {
     final info = _info!;
+    final l = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // System info card
         _buildCard(
           icon: Icons.computer,
-          title: 'System',
+          title: l.system,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _infoRow('Host', info.hostname),
-              _infoRow('OS', info.uname),
-              _infoRow('Uptime', info.uptime),
+              _infoRow(l.host, info.hostname),
+              _infoRow(l.os, info.uname),
+              _infoRow(l.uptime, info.uptime),
             ],
           ),
         ),
@@ -229,13 +231,13 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
         // Load average card
         _buildCard(
           icon: Icons.speed,
-          title: 'Load Average',
+          title: l.loadAverage,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _loadChip('1 min', info.loadAvg1),
-              _loadChip('5 min', info.loadAvg5),
-              _loadChip('15 min', info.loadAvg15),
+              _loadChip(l.load1Min, info.loadAvg1),
+              _loadChip(l.load5Min, info.loadAvg5),
+              _loadChip(l.load15Min, info.loadAvg15),
             ],
           ),
         ),
@@ -245,7 +247,7 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
         if (info.memTotal > 0) ...[
           _buildCard(
             icon: Icons.memory,
-            title: 'Memory',
+            title: l.memory,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -275,7 +277,7 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
         if (info.disks.isNotEmpty) ...[
           _buildCard(
             icon: Icons.storage,
-            title: 'Disk',
+            title: l.disk,
             child: Column(
               children: info.disks
                   .map((d) => Padding(
@@ -339,29 +341,29 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
         if (info.processes.isNotEmpty)
           _buildCard(
             icon: Icons.list_alt,
-            title: 'Top Processes',
+            title: l.topProcesses,
             child: Column(
               children: [
                 // Header row
-                const Row(
+                Row(
                   children: [
                     Expanded(
                       flex: 4,
-                      child: Text('COMMAND',
-                          style: TextStyle(
+                      child: Text(l.columnCommand,
+                          style: const TextStyle(
                               color: Colors.white38, fontSize: 11)),
                     ),
                     SizedBox(
                       width: 56,
-                      child: Text('CPU%',
-                          style: TextStyle(
+                      child: Text(l.columnCpu,
+                          style: const TextStyle(
                               color: Colors.white38, fontSize: 11),
                           textAlign: TextAlign.right),
                     ),
                     SizedBox(
                       width: 56,
-                      child: Text('MEM%',
-                          style: TextStyle(
+                      child: Text(l.columnMem,
+                          style: const TextStyle(
                               color: Colors.white38, fontSize: 11),
                           textAlign: TextAlign.right),
                     ),

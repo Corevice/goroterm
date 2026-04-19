@@ -1,6 +1,7 @@
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 import '../../core/utils/format_utils.dart';
 import 'file_browser_provider.dart';
@@ -138,88 +139,91 @@ class FileItemWidget extends StatelessWidget {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.grey[900],
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.copy, color: Colors.white),
-              title: Text(
-                'Copy path',
-                style: const TextStyle(color: Colors.white),
+      builder: (ctx) {
+        final l = AppLocalizations.of(context);
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.copy, color: Colors.white),
+                title: Text(
+                  l.copyPath,
+                  style: const TextStyle(color: Colors.white),
+                ),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  Clipboard.setData(ClipboardData(text: path));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(l.copiedPath(path)),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                },
               ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                Clipboard.setData(ClipboardData(text: path));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Copied: $path'),
-                    duration: const Duration(seconds: 2),
+              ListTile(
+                leading: const Icon(Icons.terminal, color: Colors.white),
+                title: Text(
+                  l.pasteToTerminal,
+                  style: const TextStyle(color: Colors.white),
+                ),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  onPasteToTerminal(path);
+                },
+              ),
+              if (_isPreviewable(item))
+                ListTile(
+                  leading: const Icon(Icons.visibility, color: Colors.white),
+                  title: Text(
+                    l.preview,
+                    style: const TextStyle(color: Colors.white),
                   ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.terminal, color: Colors.white),
-              title: const Text(
-                'Paste to terminal',
-                style: TextStyle(color: Colors.white),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                onPasteToTerminal(path);
-              },
-            ),
-            if (_isPreviewable(item))
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    onPreview(path);
+                  },
+                ),
+              if (item.attr.isFile)
+                ListTile(
+                  leading: const Icon(Icons.download, color: Colors.white),
+                  title: Text(
+                    l.download,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    onDownload(path);
+                  },
+                ),
               ListTile(
-                leading: const Icon(Icons.visibility, color: Colors.white),
-                title: const Text(
-                  'Preview',
-                  style: TextStyle(color: Colors.white),
+                leading: const Icon(Icons.drive_file_rename_outline,
+                    color: Colors.white),
+                title: Text(
+                  l.rename,
+                  style: const TextStyle(color: Colors.white),
                 ),
                 onTap: () {
                   Navigator.of(ctx).pop();
-                  onPreview(path);
+                  onRename(path, item.filename);
                 },
               ),
-            if (item.attr.isFile)
               ListTile(
-                leading: const Icon(Icons.download, color: Colors.white),
-                title: const Text(
-                  'Download',
-                  style: TextStyle(color: Colors.white),
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: Text(
+                  l.delete,
+                  style: const TextStyle(color: Colors.red),
                 ),
                 onTap: () {
                   Navigator.of(ctx).pop();
-                  onDownload(path);
+                  onDelete(path, item.attr.isDirectory);
                 },
               ),
-            ListTile(
-              leading: const Icon(Icons.drive_file_rename_outline,
-                  color: Colors.white),
-              title: const Text(
-                'Rename',
-                style: TextStyle(color: Colors.white),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                onRename(path, item.filename);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: const Text(
-                'Delete',
-                style: TextStyle(color: Colors.red),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                onDelete(path, item.attr.isDirectory);
-              },
-            ),
-          ],
-        ),
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'connection_provider.dart';
@@ -97,7 +98,7 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to read file: $e')),
+          SnackBar(content: Text(AppLocalizations.of(context).failedToReadFile(e.toString()))),
         );
       }
     }
@@ -105,9 +106,10 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isEditing ? 'Edit Connection' : 'New Connection'),
+        title: Text(_isEditing ? l.editConnection : l.newConnection),
       ),
       body: Form(
         key: _formKey,
@@ -116,23 +118,23 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
           children: [
             TextFormField(
               controller: _labelController,
-              decoration: const InputDecoration(
-                labelText: 'Label',
-                hintText: 'My Server',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: l.labelLabel,
+                hintText: l.labelHint,
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
             TextFormField(
               controller: _hostController,
-              decoration: const InputDecoration(
-                labelText: 'Host *',
-                hintText: 'example.com or 192.168.1.1',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: l.hostLabel,
+                hintText: l.hostHint,
+                border: const OutlineInputBorder(),
               ),
               validator: (value) {
                 if (value == null || value.trim().isEmpty) {
-                  return 'Host is required';
+                  return l.hostRequired;
                 }
                 return null;
               },
@@ -140,17 +142,17 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
             const SizedBox(height: 16),
             TextFormField(
               controller: _portController,
-              decoration: const InputDecoration(
-                labelText: 'Port',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: l.portLabel,
+                border: const OutlineInputBorder(),
               ),
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               validator: (value) {
-                if (value == null || value.isEmpty) return 'Port is required';
+                if (value == null || value.isEmpty) return l.portRequired;
                 final port = int.tryParse(value);
                 if (port == null || port < 1 || port > 65535) {
-                  return 'Invalid port (1-65535)';
+                  return l.portInvalid;
                 }
                 return null;
               },
@@ -158,13 +160,13 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
             const SizedBox(height: 16),
             TextFormField(
               controller: _usernameController,
-              decoration: const InputDecoration(
-                labelText: 'Username *',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: l.usernameLabel,
+                border: const OutlineInputBorder(),
               ),
               validator: (value) {
                 if (value == null || value.trim().isEmpty) {
-                  return 'Username is required';
+                  return l.usernameRequired;
                 }
                 return null;
               },
@@ -172,13 +174,13 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               value: _authMethod,
-              decoration: const InputDecoration(
-                labelText: 'Authentication',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: l.authenticationLabel,
+                border: const OutlineInputBorder(),
               ),
-              items: const [
-                DropdownMenuItem(value: 'password', child: Text('Password')),
-                DropdownMenuItem(value: 'key', child: Text('SSH Key')),
+              items: [
+                DropdownMenuItem(value: 'password', child: Text(l.authPassword)),
+                DropdownMenuItem(value: 'key', child: Text(l.authSshKey)),
               ],
               onChanged: (value) {
                 if (value != null) {
@@ -190,20 +192,19 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
             if (_authMethod == 'password')
               TextFormField(
                 controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Password',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: l.passwordLabel,
+                  border: const OutlineInputBorder(),
                 ),
                 obscureText: true,
               ),
             if (_authMethod == 'key') ...[
               TextFormField(
                 controller: _privateKeyController,
-                decoration: const InputDecoration(
-                  labelText: 'Private Key (PEM)',
-                  hintText:
-                      '-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: l.privateKeyLabel,
+                  hintText: l.privateKeyHint,
+                  border: const OutlineInputBorder(),
                   alignLabelWithHint: true,
                 ),
                 maxLines: 8,
@@ -211,7 +212,7 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) return null;
                   if (!value.contains('BEGIN') || !value.contains('END')) {
-                    return 'Invalid PEM format';
+                    return l.invalidPemFormat;
                   }
                   return null;
                 },
@@ -220,15 +221,15 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
               OutlinedButton.icon(
                 onPressed: _pickKeyFile,
                 icon: const Icon(Icons.folder_open),
-                label: const Text('Load from file'),
+                label: Text(l.loadFromFile),
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _passphraseController,
-                decoration: const InputDecoration(
-                  labelText: 'Passphrase (optional)',
-                  hintText: 'Passphrase for encrypted key',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: l.passphraseLabel,
+                  hintText: l.passphraseHint,
+                  border: const OutlineInputBorder(),
                 ),
                 obscureText: true,
               ),
@@ -243,7 +244,7 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.save),
-              label: Text(_isEditing ? 'Update' : 'Save'),
+              label: Text(_isEditing ? l.update : l.save),
             ),
           ],
         ),
@@ -305,7 +306,7 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save: $e')),
+          SnackBar(content: Text(AppLocalizations.of(context).failedToSave(e.toString()))),
         );
       }
     } finally {
