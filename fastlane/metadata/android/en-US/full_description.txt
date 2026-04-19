@@ -1,0 +1,29 @@
+GoroTerm is a mobile-first SSH terminal designed for power users who want a real terminal experience on phone or tablet.
+
+KEY FEATURES
+
+• Full SSH client with password and key authentication (passphrase-protected keys supported)
+• Secure host key verification on first connection and on key change — protected against MITM attacks
+• xterm-based terminal with mouse, touch, IME, and ANSI color support
+• Multi-tab terminals with drag-to-reorder
+• tmux session manager — list, attach, create, rename, kill, and "open all" sessions in tabs at once
+• SFTP file browser with upload, download, preview, rename, and delete
+• Server resource monitor — CPU load, memory, disk usage, top processes
+• Claude Code usage tracker (5-hour and 7-day limits, plan info)
+• Voice input (long-form dictation in 100+ languages)
+• Image and clipboard paste with optional GIF conversion via ffmpeg
+• Foreground service keeps SSH connections alive in the background
+• In-app updates from the Play Store
+• Battery saving mode with adjustable keepalive intervals
+
+PRIVACY FIRST
+
+• All data is stored on your device only
+• Credentials are protected by Android Keystore
+• No analytics, no telemetry, no third-party data sharing
+
+MULTI-LANGUAGE UI
+
+English, Japanese, and Indonesian — automatically follows your device language.
+
+GoroTerm is built for developers, sysadmins, and anyone who needs reliable shell access on the go.

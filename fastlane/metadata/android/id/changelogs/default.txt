@@ -1,0 +1,5 @@
+• Dukungan multi-bahasa: Inggris, Jepang, Indonesia
+• Hemat baterai: interval keepalive default lebih panjang (dapat dikonfigurasi di Pengaturan)
+• Notifikasi pembaruan dalam aplikasi dari Play Store
+• Tab strip lebih mudah digunakan: tombol tutup lebih besar, gulir tanpa pemicu pengubahan urutan
+• "Buka semua" sesi tmux, tombol kembali ke daftar koneksi

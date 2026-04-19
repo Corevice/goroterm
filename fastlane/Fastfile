@@ -7,6 +7,8 @@ platform :android do
       track: "internal",
       release_status: "draft",
       aab: "build/app/outputs/bundle/release/app-release.aab",
+      # internal track はメタデータ反映が遅延しがちなので
+      # production lane でだけメタデータを送る
       skip_upload_metadata: true,
       skip_upload_changelogs: true,
       skip_upload_images: true,
@@ -14,14 +16,17 @@ platform :android do
     )
   end
 
-  desc "Upload AAB to Google Play Production (100% rollout)"
+  desc "Upload AAB + localized store listings to Google Play Production (100% rollout)"
   lane :deploy_production do
     upload_to_play_store(
       track: "production",
       release_status: "completed",
       aab: "build/app/outputs/bundle/release/app-release.aab",
-      skip_upload_metadata: true,
-      skip_upload_changelogs: true,
+      # fastlane/metadata/android/{en-US,ja-JP,id}/ から
+      # title / short_description / full_description / changelogs を反映
+      skip_upload_metadata: false,
+      skip_upload_changelogs: false,
+      # スクリーンショットと feature graphic は別途整備するまでスキップ
       skip_upload_images: true,
       skip_upload_screenshots: true,
     )

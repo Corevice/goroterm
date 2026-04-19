@@ -1,0 +1,29 @@
+GoroTerm adalah klien SSH yang dirancang untuk pengguna profesional yang menginginkan pengalaman terminal sungguhan di ponsel atau tablet.
+
+FITUR UTAMA
+
+• Klien SSH lengkap dengan autentikasi kata sandi maupun kunci (mendukung kunci terenkripsi dengan frasa sandi)
+• Verifikasi kunci host pada koneksi pertama dan saat kunci berubah — terlindungi dari serangan man-in-the-middle
+• Terminal berbasis xterm dengan dukungan mouse, sentuh, IME, dan warna ANSI
+• Banyak tab terminal yang dapat diatur ulang dengan menyeret
+• Manajer sesi tmux — daftar, attach, buat, ganti nama, akhiri, dan buka semua sesi sekaligus dalam tab
+• Penjelajah berkas SFTP dengan unggah, unduh, pratinjau, ganti nama, dan hapus
+• Monitor sumber daya server — beban CPU, memori, disk, proses teratas
+• Pelacak penggunaan Claude Code (batas 5 jam dan 7 hari, info paket)
+• Input suara (diktasi panjang dalam 100+ bahasa)
+• Tempel gambar dan papan klip dengan konversi GIF opsional via ffmpeg
+• Layanan latar depan menjaga koneksi SSH tetap aktif di latar belakang
+• Notifikasi pembaruan dalam aplikasi langsung dari Play Store
+• Mode hemat baterai dengan interval keepalive yang dapat disesuaikan
+
+PRIVASI DI ATAS SEGALANYA
+
+• Semua data hanya disimpan di perangkat Anda
+• Kredensial dilindungi oleh Android Keystore
+• Tidak ada analitik, telemetri, atau berbagi data ke pihak ketiga
+
+DUKUNGAN MULTI-BAHASA
+
+Inggris, Jepang, dan Indonesia — otomatis mengikuti bahasa perangkat Anda.
+
+GoroTerm dibuat untuk developer, sysadmin, dan siapa saja yang membutuhkan akses shell yang andal saat bepergian.
