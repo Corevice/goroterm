@@ -74,12 +74,12 @@ void main() {
       expect(view.getInt32(0, Endian.host), 1);
     });
 
-    test('TCP idle option value is 15 seconds', () {
+    test('TCP idle option value matches PowerSettings default (45 seconds)', () {
       KeepaliveSSHSocket.applyKeepaliveOptions(socket);
       // The idle-time option is the second option (index 1).
       final idleOpt = socket.rawOptions[1];
       final view = ByteData.sublistView(idleOpt.value);
-      expect(view.getInt32(0, Endian.host), 15);
+      expect(view.getInt32(0, Endian.host), 45);
     });
 
     test('does not throw even when socket setRawOption throws', () {

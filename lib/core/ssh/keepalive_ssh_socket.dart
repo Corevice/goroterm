@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/foundation.dart';
 
+import '../preferences/power_settings.dart';
+
 // SO_KEEPALIVE option number at SOL_SOCKET level (platform-specific)
 const _soKeepaliveLinux = 9; // Linux/Android
 const _soKeepaliveDarwin = 8; // macOS/iOS (0x0008)
@@ -65,10 +67,14 @@ class KeepaliveSSHSocket implements SSHSocket {
         ),
       );
 
+      // ユーザー設定の idle 値を使用。短いほど切断検知が早いがバッテリー消費大。
+      final idleSeconds = PowerSettings.tcpKeepaliveIdleSeconds;
+
       if (isDarwin) {
         // macOS/iOS: TCP_KEEPALIVE (idle), TCP_KEEPINTVL, TCP_KEEPCNT
         socket.setRawOption(
-          RawSocketOption.fromInt(RawSocketOption.levelTcp, _tcpKeepaliveDarwin, 15),
+          RawSocketOption.fromInt(
+              RawSocketOption.levelTcp, _tcpKeepaliveDarwin, idleSeconds),
         );
         socket.setRawOption(
           RawSocketOption.fromInt(RawSocketOption.levelTcp, _tcpKeepintvlDarwin, 10),
@@ -78,9 +84,9 @@ class KeepaliveSSHSocket implements SSHSocket {
         );
       } else {
         // Linux/Android: TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_KEEPCNT
-        // 15秒: モバイル NAT の最短タイムアウト (30秒) より十分短い値
         socket.setRawOption(
-          RawSocketOption.fromInt(RawSocketOption.levelTcp, _tcpKeepidle, 15),
+          RawSocketOption.fromInt(
+              RawSocketOption.levelTcp, _tcpKeepidle, idleSeconds),
         );
         socket.setRawOption(
           RawSocketOption.fromInt(RawSocketOption.levelTcp, _tcpKeepintvl, 10),

@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import '../preferences/power_settings.dart';
+
 /// Android Foreground Service ラッパー。
 /// SSH 接続中にプロセスと WiFi を維持する。
 class SshForegroundService {
@@ -28,7 +30,8 @@ class SshForegroundService {
         showNotification: false,
       ),
       foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(60000),
+        eventAction:
+            ForegroundTaskEventAction.repeat(PowerSettings.tickSeconds * 1000),
         autoRunOnBoot: false,
         allowWakeLock: false,
         allowWifiLock: false,

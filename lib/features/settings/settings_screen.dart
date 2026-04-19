@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/preferences/power_settings.dart';
 import '../../core/utils/app_logger.dart';
 
 import '../../core/theme/theme_provider.dart';
@@ -97,6 +98,12 @@ class SettingsScreen extends ConsumerWidget {
 
           const Divider(),
 
+          // Power section
+          const _SectionHeader(title: 'Battery Saving'),
+          const _PowerSettingsTile(),
+
+          const Divider(),
+
           // Diagnostics section
           const _SectionHeader(title: 'Diagnostics'),
           ListTile(
@@ -153,6 +160,95 @@ class SettingsScreen extends ConsumerWidget {
             leading: const Icon(Icons.info_outline),
             title: const Text('Version'),
             trailing: const Text('1.0.0'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PowerSettingsTile extends ConsumerWidget {
+  const _PowerSettingsTile();
+
+  String _formatSeconds(int s) =>
+      s >= 60 ? '${s ~/ 60} min' : '$s sec';
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tick = ref.watch(tickIntervalProvider);
+    final tcp = ref.watch(tcpKeepaliveIdleProvider);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Background health check (foreground service tick)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Text(
+                  'Background health check',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+              ),
+              DropdownButton<int>(
+                value: tick,
+                items: [
+                  for (final v in tickPresetSeconds)
+                    DropdownMenuItem(value: v, child: Text(_formatSeconds(v))),
+                ],
+                onChanged: (v) {
+                  if (v != null) {
+                    ref.read(tickIntervalProvider.notifier).setValue(v);
+                  }
+                },
+              ),
+            ],
+          ),
+          Text(
+            '間隔が長いほど省電力。バックグラウンドの SSH 接続死活確認の頻度。',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+
+          const SizedBox(height: 16),
+
+          // TCP keepalive idle
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Text(
+                  'TCP keepalive interval',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+              ),
+              DropdownButton<int>(
+                value: tcp,
+                items: [
+                  for (final v in tcpKeepalivePresetSeconds)
+                    DropdownMenuItem(value: v, child: Text(_formatSeconds(v))),
+                ],
+                onChanged: (v) {
+                  if (v != null) {
+                    ref.read(tcpKeepaliveIdleProvider.notifier).setValue(v);
+                  }
+                },
+              ),
+            ],
+          ),
+          Text(
+            '間隔が長いほど省電力。短いほど切断検知が早いが NAT が短い回線（公衆 WiFi 等）では切断されやすい。',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+
+          const SizedBox(height: 8),
+          Text(
+            '※ 変更はアプリ再起動 / 次回接続時から反映されます。',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontStyle: FontStyle.italic,
+                ),
           ),
         ],
       ),
