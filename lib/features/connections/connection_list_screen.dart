@@ -2,14 +2,44 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/storage/database.dart';
+import '../../core/update/in_app_update_service.dart';
 import '../terminal/session_manager.dart';
 import 'connection_provider.dart';
 
-class ConnectionListScreen extends ConsumerWidget {
+class ConnectionListScreen extends ConsumerStatefulWidget {
   const ConnectionListScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ConnectionListScreen> createState() =>
+      _ConnectionListScreenState();
+}
+
+class _ConnectionListScreenState extends ConsumerState<ConnectionListScreen>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      InAppUpdateService.checkAndPromptUpdate();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      InAppUpdateService.checkAndPromptUpdate();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final connectionsAsync = ref.watch(connectionListProvider);
     final activeSessions = ref.watch(
       sessionManagerProvider.select((s) => s.sessions.length),
