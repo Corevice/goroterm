@@ -6,6 +6,12 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# Play Console は 1 アプリ 1 edit の排他制御。main push と tag push が同時に
+# 走ると後勝ちで片方が "edit expired" エラーになるため、グループ単位で直列化する。
+concurrency:
+  group: android-play-deploy
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
