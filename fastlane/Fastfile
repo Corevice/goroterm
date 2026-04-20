@@ -80,22 +80,31 @@ platform :mac do
     signing_identity = ENV["MACOS_SIGNING_IDENTITY"] || "Developer ID Application"
     sh("codesign --force --sign '#{signing_identity}' --timestamp '../#{dmg_path}'")
 
-    # 公証 + staple (App Store Connect API key 利用、iOS と共用)
-    api_key = app_store_connect_api_key(
-      key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
-      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
-      key_content: ENV["APP_STORE_CONNECT_API_KEY_P8"],
-      is_key_content_base64: false,
-      in_house: false,
-    )
-    notarize(
-      package: dmg_path,
-      bundle_id: "com.corevice.goroterm",
-      api_key: api_key,
-      print_log: true,
-      verbose: true,
-    )
+    # 公証 + staple は notarytool を直接呼ぶ。
+    # fastlane の `notarize` アクションは notarytool 出力 (タイムスタンプ付き) を
+    # JSON.parse しようとして失敗するため使わない。
+    key_id = ENV["APP_STORE_CONNECT_API_KEY_ID"]
+    issuer_id = ENV["APP_STORE_CONNECT_ISSUER_ID"]
+    key_content = ENV["APP_STORE_CONNECT_API_KEY_P8"]
+    UI.user_error!("Missing APP_STORE_CONNECT_* env vars") \
+      if key_id.nil? || issuer_id.nil? || key_content.nil? || key_content.empty?
 
+    require "tempfile"
+    key_file = Tempfile.new(["AuthKey_#{key_id}", ".p8"])
+    key_file.write(key_content)
+    key_file.close
+
+    UI.message("Submitting #{dmg_path} to notarytool…")
+    sh("xcrun notarytool submit '../#{dmg_path}' " \
+       "--key '#{key_file.path}' --key-id '#{key_id}' --issuer '#{issuer_id}' " \
+       "--wait --output-format json")
+
+    UI.message("Stapling notarization ticket…")
+    sh("xcrun stapler staple '../#{dmg_path}'")
+
+    sh("xcrun stapler validate '../#{dmg_path}'")
     UI.success("Notarized DMG: #{dmg_path}")
+  ensure
+    key_file&.unlink
   end
 end
