@@ -113,6 +113,7 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
 
   void setEditingState(TextEditingValue value) {
     _currentEditingState = value;
+    _sentBase = value.text;
     _connection?.setEditingState(value);
   }
 
@@ -174,6 +175,11 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
 
       // setEditableRect(Rect.zero, Rect.zero);
 
+      // 新規接続時は IME 側と Flutter 側を一致させる。
+      // タブ切り替えで再接続する際、前回セッションの _sentBase が残ると
+      // 次の入力が「削除」と誤判定されるのを防ぐ。
+      _currentEditingState = _initEditingState;
+      _sentBase = _initEditingState.text;
       _connection!.setEditingState(_initEditingState);
     }
   }
