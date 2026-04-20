@@ -541,10 +541,7 @@ class _TabStripState extends State<_TabStrip> {
             session.sessionId,
             () => GlobalKey(),
           );
-          return ReorderableDelayedDragStartListener(
-            key: ValueKey(session.sessionId),
-            index: index,
-            child: InkWell(
+          final dragChild = InkWell(
               key: tabKey,
               onTap: () => widget.onSelect(session.sessionId),
               child: Container(
@@ -583,8 +580,21 @@ class _TabStripState extends State<_TabStrip> {
                   ],
                 ),
               ),
-            ),
-          );
+            );
+          // タッチ端末は長押しでドラッグ開始（タップ/スクロールと区別するため）。
+          // デスクトップ（マウス）は遅延型だと反応しないので即時ドラッグにする。
+          final useDelayed = Platform.isAndroid || Platform.isIOS;
+          return useDelayed
+              ? ReorderableDelayedDragStartListener(
+                  key: ValueKey(session.sessionId),
+                  index: index,
+                  child: dragChild,
+                )
+              : ReorderableDragStartListener(
+                  key: ValueKey(session.sessionId),
+                  index: index,
+                  child: dragChild,
+                );
         },
       ),
     );
