@@ -198,18 +198,9 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   late var _currentEditingState = _initEditingState.copyWith();
 
   /// 最後に送信済みの時点でのテキストバッファ。
-  /// 次回の delta は `text.substring(_sentBase.length, confirmedEnd)` で計算する。
+  /// 次回の delta は `text.substring(_sentBase.length)` で計算する。
   /// 初期値は `_initEditingState.text`（"  " or ""）で、起動時のパディングは送信しない。
-  /// IME が付加するゴミテキスト（bunsetsu 区切り空白等）もこの値に取り込むことで、
-  /// 次回の delta 計算からゴミを自動的に除外できる。
   late String _sentBase = _initEditingState.text;
-
-  /// composing 中に記録された composing 終了位置。
-  ///
-  /// Google 日本語入力は確定直後に composing 範囲外のゴミテキスト
-  /// （bunsetsu 区切りの空白など）を付加するため、composing 中に
-  /// 記録したこの値を "有効なテキスト境界" として信頼する。
-  int _lastComposingEnd = 0;
 
   @override
   TextEditingValue? get currentTextEditingValue {
@@ -227,8 +218,6 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
 
     // --- composing 中: 送信しない ---
     if (!_currentEditingState.composing.isCollapsed) {
-      // composing 終了位置を記録（確定時にここまでが有効テキスト）
-      _lastComposingEnd = _currentEditingState.composing.end;
       final composingText = _currentEditingState.composing
           .textInside(_currentEditingState.text);
       widget.onComposing(composingText);
@@ -244,28 +233,16 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
     if (text.length < _sentBase.length) {
       widget.onDelete();
       _sentBase = text;
-      _lastComposingEnd = 0;
       return;
     }
 
-    // 確定テキストの終端を決定。
-    // Google 日本語入力は確定時に composing 範囲外のゴミ（bunsetsu 区切り空白等）
-    // を付加するため、composing 中に記録した _lastComposingEnd を信頼する。
-    int confirmedEnd;
-    if (_lastComposingEnd > 0 && _lastComposingEnd <= text.length) {
-      confirmedEnd = _lastComposingEnd;
-    } else {
-      confirmedEnd = text.length;
-    }
-    _lastComposingEnd = 0;
-
-    // _sentBase 以降 confirmedEnd までの新テキストを送信
-    if (confirmedEnd > _sentBase.length) {
-      final newPart = text.substring(_sentBase.length, confirmedEnd);
+    // _sentBase 以降の新テキストを送信。
+    // 予測変換で text が拡張されるケース（例: "ちけ" → "チケット" 選択）も
+    // そのまま取り込めるよう、text.length までを素直に送る。
+    if (text.length > _sentBase.length) {
+      final newPart = text.substring(_sentBase.length);
       widget.onInsert(newPart);
     }
-    // _sentBase は現在のバッファ全体（IME のゴミを含む）に更新。
-    // これで次回の delta 計算時、ゴミ分を自動的にスキップできる。
     _sentBase = text;
 
     // バッファが大きくなりすぎたらクリーンアップ
@@ -273,7 +250,6 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
     if (_sentBase.length > 500 &&
         _currentEditingState.composing.isCollapsed) {
       _sentBase = _initEditingState.text;
-      _lastComposingEnd = 0;
       _currentEditingState = _initEditingState;
       _connection?.setEditingState(_initEditingState);
     }

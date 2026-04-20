@@ -1,5 +1,5 @@
-• Fix: Japanese IME (Google Japanese Input) no longer inserts spaces between segments
+• Fix: Japanese IME prediction selection now commits the full text (e.g. "ちけ" → "チケット")
+• Fix: Japanese IME no longer inserts spaces between segments
 • Multi-language UI: English, Japanese, Indonesian
 • Battery saving: longer default keepalive intervals (configurable in Settings)
-• In-app update notifications from Play Store
 • Tab strip improvements: easier close button, scroll without accidental reorder

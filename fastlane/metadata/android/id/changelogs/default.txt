@@ -1,5 +1,5 @@
+• Perbaikan: Pemilihan prediksi IME Jepang kini menyisipkan teks secara penuh
 • Perbaikan: Google Japanese Input tidak lagi menyisipkan spasi antar segmen
 • Dukungan multi-bahasa: Inggris, Jepang, Indonesia
 • Hemat baterai: interval keepalive default lebih panjang (dapat dikonfigurasi di Pengaturan)
-• Notifikasi pembaruan dalam aplikasi dari Play Store
 • Tab strip lebih mudah digunakan: tombol tutup lebih besar, gulir tanpa pemicu pengubahan urutan
