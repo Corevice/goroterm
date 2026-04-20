@@ -197,11 +197,11 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
 
   late var _currentEditingState = _initEditingState.copyWith();
 
-  /// 確定待ちの delta テキスト。composing 終了後、短い遅延で送信する。
-  String? _pendingInsert;
-  bool _pendingDelete = false;
-  /// setEditingState 後のプラットフォームエコーを無視するためのフラグ。
-  bool _pendingReset = false;
+  /// 送信済みテキストの長さ（_currentEditingState.text 内の位置）。
+  int _sentUpTo = 0;
+
+  /// composing 中の最後の composing 終了位置。Google IME 二重化検出用。
+  int _lastComposingEnd = 0;
 
   @override
   TextEditingValue? get currentTextEditingValue {
@@ -217,63 +217,55 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   void updateEditingValue(TextEditingValue value) {
     _currentEditingState = value;
 
-    // composing 中
+    // --- composing 中: 送信しない ---
     if (!_currentEditingState.composing.isCollapsed) {
-      // 新しい composing が始まったらリセット待ちを解除
-      _pendingReset = false;
-      // 前回の確定待ちがあればキャンセル（部分確定だった）
-      _pendingInsert = null;
-      _pendingDelete = false;
-
-      final text = _currentEditingState.text;
-      final composingText = _currentEditingState.composing.textInside(text);
+      _lastComposingEnd = _currentEditingState.composing.end;
+      final composingText = _currentEditingState.composing
+          .textInside(_currentEditingState.text);
       widget.onComposing(composingText);
       return;
     }
 
-    // リセット後のプラットフォームエコーを無視
-    if (_pendingReset) {
+    // --- composing 終了 or 通常入力 ---
+    widget.onComposing(null);
+
+    final text = _currentEditingState.text;
+
+    // 削除検出
+    if (text.length < _sentUpTo) {
+      widget.onDelete();
+      _sentUpTo = text.length;
+      _lastComposingEnd = 0;
       return;
     }
 
-    widget.onComposing(null);
-
-    // delta 計算
-    if (_currentEditingState.text.length < _initEditingState.text.length) {
-      _pendingInsert = null;
-      _pendingDelete = true;
+    // 確定テキストの終端を決定
+    // Google IME は確定時にゴミテキストを付加するため、
+    // composing 中に記録した _lastComposingEnd を信頼する
+    int confirmedEnd;
+    if (_lastComposingEnd > 0 && _lastComposingEnd <= text.length) {
+      confirmedEnd = _lastComposingEnd;
     } else {
-      final textDelta = _currentEditingState.text.substring(
-        _initEditingState.text.length,
-      );
-      _pendingInsert = textDelta.isNotEmpty ? textDelta : null;
-      _pendingDelete = false;
+      confirmedEnd = text.length;
+    }
+    _lastComposingEnd = 0;
+
+    // _sentUpTo 以降 confirmedEnd までの新テキストを送信
+    if (confirmedEnd > _sentUpTo) {
+      final newPart = text.substring(_sentUpTo, confirmedEnd);
+      widget.onInsert(newPart);
+      _sentUpTo = confirmedEnd;
     }
 
-    // 送信 + リセットを短い遅延で実行。
-    // 新しい composing が始まれば _pendingInsert はキャンセルされる。
-    Future.delayed(const Duration(milliseconds: 20), () {
-      // 送信
-      if (_pendingDelete) {
-        _pendingDelete = false;
-        widget.onDelete();
-      } else if (_pendingInsert != null) {
-        final text = _pendingInsert!;
-        _pendingInsert = null;
-        widget.onInsert(text);
-      }
-
-      // リセット: setEditingState 後のプラットフォーム応答（旧テキストのエコー）を
-      // 無視するため、_pendingReset で保護する。
+    // 遅延リセット: ゴミテキストを含むバッファをクリーンアップ
+    Future.delayed(const Duration(milliseconds: 80), () {
       if (_connection?.attached == true &&
           _currentEditingState.composing.isCollapsed &&
           _currentEditingState.text != _initEditingState.text) {
-        _pendingReset = true;
         _currentEditingState = _initEditingState;
+        _sentUpTo = 0;
+        _lastComposingEnd = 0;
         _connection!.setEditingState(_initEditingState);
-        Future.delayed(const Duration(milliseconds: 30), () {
-          _pendingReset = false;
-        });
       }
     });
   }

@@ -4,5 +4,9 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
+	<!-- 第三者 Pod (CwlCatchException 等) は別 Team ID で署名されているため
+	     Hardened Runtime 下では library validation を無効化する必要がある。 -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
 </dict>
 </plist>
