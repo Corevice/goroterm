@@ -726,6 +726,7 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/Release.entitlements;
 				CODE_SIGN_IDENTITY = "Developer ID Application";
 				CODE_SIGN_STYLE = Manual;
+				OTHER_CODE_SIGN_FLAGS = "--timestamp";
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
