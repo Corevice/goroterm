@@ -55,5 +55,11 @@
 	<string>Voice input for terminal commands</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone access for voice input</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Select images to paste into the terminal session</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save files downloaded from remote servers to your photo library</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Capture images to paste into the terminal session</string>
 </dict>
 </plist>
