@@ -9,7 +9,9 @@ on:
 jobs:
   build-and-deploy:
     runs-on: macos-latest
-    timeout-minutes: 60
+    # Apple の公証キューは空いてれば数分だが、混雑時は 1 時間超えることもある。
+    # Build + pod install + notarytool wait + staple まで余裕を持たせて 180 分。
+    timeout-minutes: 180
     permissions:
       contents: write
 
