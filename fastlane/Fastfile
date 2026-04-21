@@ -34,20 +34,66 @@ platform :android do
 end
 
 platform :ios do
-  desc "Upload IPA to TestFlight"
-  lane :deploy do
-    api_key = app_store_connect_api_key(
+  def asc_api_key
+    app_store_connect_api_key(
       key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
       issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
       key_content: ENV["APP_STORE_CONNECT_API_KEY_P8"],
       is_key_content_base64: false,
       in_house: false,
     )
+  end
 
+  desc "Upload IPA to TestFlight"
+  lane :deploy do
     upload_to_testflight(
-      api_key: api_key,
+      api_key: asc_api_key,
       skip_waiting_for_build_processing: true,
       ipa: "build/ios/ipa/GoroTerm.ipa",
+    )
+  end
+
+  # App Store Connect のメタデータ (説明文 / キーワード / プロモ文 / URL) のみ
+  # を更新。バイナリ・スクリーンショットは触らない。本番審査前のメタ修正に使う。
+  desc "Upload App Store metadata (no binary, no screenshots)"
+  lane :metadata do
+    deliver(
+      api_key: asc_api_key,
+      metadata_path: "./fastlane/metadata/ios",
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      skip_metadata: false,
+      force: true,                 # HTML プレビューをスキップ
+      precheck_include_in_app_purchases: false,
+    )
+  end
+
+  # App Store 審査提出。メタデータ更新 + 最新 TestFlight ビルドを使って submit。
+  # スクリーンショットは別途 App Store Connect 側で揃えておくこと。
+  desc "Submit latest TestFlight build to App Store review"
+  lane :submit_review do
+    deliver(
+      api_key: asc_api_key,
+      metadata_path: "./fastlane/metadata/ios",
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      submit_for_review: true,
+      automatic_release: false,    # 承認後の公開タイミングは手動
+      force: true,
+      precheck_include_in_app_purchases: false,
+      submission_information: {
+        # SSH の標準暗号 (AES/RSA/ECDSA) のみ → exempt 扱い
+        export_compliance_uses_encryption: true,
+        export_compliance_is_exempt: true,
+        export_compliance_encryption_updated: false,
+        export_compliance_app_type: nil,
+        export_compliance_contains_third_party_cryptography: false,
+        export_compliance_contains_proprietary_cryptography: false,
+        export_compliance_available_on_french_store: true,
+        # 第三者コンテンツ・広告識別子
+        content_rights_contains_third_party_content: false,
+        add_id_info_uses_idfa: false,
+      },
     )
   end
 end

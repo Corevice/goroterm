@@ -1,0 +1,24 @@
+Goroterm is a modern SSH terminal client built for developers and operators who need quick, reliable access to remote servers from their iPhone or iPad.
+
+KEY FEATURES
+
+• Multi-session tabs — connect to multiple servers or open several shells to the same host, switch between them instantly
+• tmux integration — list, attach, create, rename, and kill tmux sessions directly from the UI; seamless reattach on reconnect
+• SFTP file browser — browse remote directories, preview files, upload and download with background transfer
+• Voice input — dictate commands with on-device speech recognition
+• Clipboard image paste — drop images into terminal output on supported servers
+• Quick action bar — Ctrl, Esc, Tab, arrow keys, PgUp/PgDn, and Ctrl+J always one tap away
+• Server monitor — at-a-glance CPU, memory, and disk usage for the connected host
+• Claude usage dashboard — track token usage if your server runs the Claude CLI
+• Secure credential storage — passwords and private keys encrypted on-device; never synced
+• Host key verification — full known_hosts workflow with change detection
+• Automatic reconnect — survives network changes, background/foreground transitions, and temporary disconnects
+• Dark theme by default, built to minimize eye strain during long sessions
+
+Goroterm is engineered to feel fast on mobile: no-jank scrolling, proper IME handling, and a quick action bar that keeps your thumbs on glass instead of hunting through sub-menus. Connections stay alive in the background so you can return to the same prompt you left.
+
+PRIVACY
+
+Your SSH credentials never leave your device. Goroterm does not collect analytics, tracking identifiers, or usage data. See the privacy policy for details.
+
+Requires an existing SSH server to connect to.

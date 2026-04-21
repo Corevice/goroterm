@@ -1,0 +1,1 @@
+ssh,terminal,tmux,sftp,server,shell,developer,ops,devops,console
