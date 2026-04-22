@@ -357,13 +357,20 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
               } else if (value == 'server_monitor') {
                 ServerMonitorDialog.show(context, activeSession.sessionId);
               } else if (value == 'refresh_screen') {
-                // PTY サイズを再送信して tmux に強制リドローさせる
+                // PTY サイズをワザと wobble させて SIGWINCH を発火させ、
+                // tmux / シェル / TUI アプリに再描画を促す。
+                // （同サイズ再送だと dartssh2 が no-op 扱いすることがある）
                 final connState = ref.read(
                     terminalConnectionProvider(activeSession.sessionId));
                 final terminal = connState.terminal;
                 final cm = connState.channelManager;
                 if (terminal != null && cm != null) {
-                  cm.resizePty(terminal.viewWidth, terminal.viewHeight);
+                  final w = terminal.viewWidth;
+                  final h = terminal.viewHeight;
+                  cm.resizePty(w + 1, h);
+                  Future.delayed(const Duration(milliseconds: 50), () {
+                    cm.resizePty(w, h);
+                  });
                 }
               }
             },

@@ -1,5 +1,5 @@
+• Perbaikan: Tombol "Segarkan Layar" kini benar-benar memaksa pengecetan ulang
 • Perbaikan: Karakter pertama hilang setelah berpindah tab
-• Perbaikan: Pemilihan prediksi IME Jepang kini menyisipkan teks secara penuh
-• Perbaikan: Google Japanese Input tidak lagi menyisipkan spasi antar segmen
+• Perbaikan: Pemilihan prediksi IME Jepang / spasi antar segmen
 • Dukungan multi-bahasa: Inggris, Jepang, Indonesia
 • Hemat baterai: interval keepalive default lebih panjang (dapat dikonfigurasi di Pengaturan)
