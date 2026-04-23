@@ -1,5 +1,5 @@
+• New: Select specific tmux sessions to open in bulk (tap "Select" → check desired sessions)
 • Fix: "Refresh Screen" button now actually forces redraw
 • Fix: First character lost after switching tabs
 • Fix: Japanese IME prediction truncation / segment spacing
 • Multi-language UI: English, Japanese, Indonesian
-• Battery saving: longer default keepalive intervals (configurable in Settings)

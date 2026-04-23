@@ -130,6 +130,8 @@
   "renameSessionTitle": "セッション名を変更",
   "failedToRenameSession": "セッション名変更失敗: {error}",
   "openAllSessions": "{count} 個のセッションをすべて開く",
+  "selectSessions": "選択",
+  "openSelectedSessions": "選択した {count} 件を開く",
   "tmuxNotInstalled": "tmux がインストールされていません",
   "installTmuxOnServer": "サーバーに tmux をインストールしてください:",
   "distroDebianUbuntu": "Debian/Ubuntu",

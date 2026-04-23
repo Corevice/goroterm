@@ -259,6 +259,39 @@ class _SessionListView extends StatefulWidget {
 }
 
 class _SessionListViewState extends State<_SessionListView> {
+  bool _selectionMode = false;
+  final Set<String> _selected = <String>{};
+
+  void _enterSelectionMode() {
+    setState(() => _selectionMode = true);
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selected.clear();
+    });
+  }
+
+  void _toggleSelected(String name) {
+    setState(() {
+      if (_selected.contains(name)) {
+        _selected.remove(name);
+      } else {
+        _selected.add(name);
+      }
+    });
+  }
+
+  void _openSelected() {
+    // snapshot してから pop（pop 後に _selected を読むと空になる可能性があるため）
+    final toOpen = _selected.toList();
+    for (final name in toOpen) {
+      widget.onAttach(name);
+    }
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.state.sessions.isEmpty) {
@@ -271,27 +304,35 @@ class _SessionListViewState extends State<_SessionListView> {
       );
     }
 
-    final showOpenAll =
+    final showHeader =
         widget.canOpenAll && widget.state.sessions.length > 1;
 
     return RefreshIndicator(
       onRefresh: widget.onRefresh,
       child: ListView.builder(
-        itemCount: widget.state.sessions.length + (showOpenAll ? 1 : 0),
+        itemCount: widget.state.sessions.length + (showHeader ? 1 : 0),
         itemBuilder: (context, index) {
-          if (showOpenAll && index == 0) {
-            return _OpenAllButton(
+          if (showHeader && index == 0) {
+            return _BulkOpenHeader(
               count: widget.state.sessions.length,
-              onPressed: () {
+              selectedCount: _selected.length,
+              selectionMode: _selectionMode,
+              onOpenAll: () {
                 widget.onOpenAll?.call();
                 Navigator.of(context).pop();
               },
+              onEnterSelection: _enterSelectionMode,
+              onCancelSelection: _exitSelectionMode,
+              onOpenSelected: _selected.isEmpty ? null : _openSelected,
             );
           }
-          final sessionIdx = showOpenAll ? index - 1 : index;
+          final sessionIdx = showHeader ? index - 1 : index;
           final session = widget.state.sessions[sessionIdx];
           return _SessionCard(
             session: session,
+            selectionMode: _selectionMode,
+            isSelected: _selected.contains(session.name),
+            onToggleSelected: () => _toggleSelected(session.name),
             onAttach: () {
               widget.onAttach(session.name);
               Navigator.of(context).pop();
@@ -437,25 +478,98 @@ class _SessionListViewState extends State<_SessionListView> {
 
 // ---------------------------------------------------------------------------
 
-class _OpenAllButton extends StatelessWidget {
-  const _OpenAllButton({required this.count, required this.onPressed});
+class _BulkOpenHeader extends StatelessWidget {
+  const _BulkOpenHeader({
+    required this.count,
+    required this.selectedCount,
+    required this.selectionMode,
+    required this.onOpenAll,
+    required this.onEnterSelection,
+    required this.onCancelSelection,
+    required this.onOpenSelected,
+  });
 
   final int count;
-  final VoidCallback onPressed;
+  final int selectedCount;
+  final bool selectionMode;
+  final VoidCallback onOpenAll;
+  final VoidCallback onEnterSelection;
+  final VoidCallback onCancelSelection;
+  final VoidCallback? onOpenSelected;
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final teal = Colors.tealAccent;
+    final border = BorderSide(color: teal.withValues(alpha: 0.5));
+
+    if (selectionMode) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onCancelSelection,
+                icon: const Icon(Icons.close, size: 18),
+                label: Text(l.cancel),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.grey[400],
+                  side: BorderSide(color: Colors.grey.withValues(alpha: 0.5)),
+                  minimumSize: const Size.fromHeight(40),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: FilledButton.icon(
+                onPressed: onOpenSelected,
+                icon: const Icon(Icons.open_in_new, size: 18),
+                label: Text(l.openSelectedSessions(selectedCount)),
+                style: FilledButton.styleFrom(
+                  backgroundColor: teal,
+                  foregroundColor: Colors.black,
+                  minimumSize: const Size.fromHeight(40),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-      child: OutlinedButton.icon(
-        onPressed: onPressed,
-        icon: const Icon(Icons.open_in_new, size: 18),
-        label: Text(AppLocalizations.of(context).openAllSessions(count)),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.tealAccent,
-          side: BorderSide(color: Colors.tealAccent.withValues(alpha: 0.5)),
-          minimumSize: const Size.fromHeight(40),
-        ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: OutlinedButton.icon(
+              onPressed: onOpenAll,
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: Text(l.openAllSessions(count)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: teal,
+                side: border,
+                minimumSize: const Size.fromHeight(40),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: onEnterSelection,
+              icon: const Icon(Icons.check_box_outlined, size: 18),
+              label: Text(l.selectSessions),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: teal,
+                side: border,
+                minimumSize: const Size.fromHeight(40),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -469,15 +583,59 @@ class _SessionCard extends StatelessWidget {
     required this.onAttach,
     required this.onDelete,
     required this.onRename,
+    this.selectionMode = false,
+    this.isSelected = false,
+    this.onToggleSelected,
   });
 
   final TmuxSession session;
   final VoidCallback onAttach;
   final VoidCallback onDelete;
   final VoidCallback onRename;
+  final bool selectionMode;
+  final bool isSelected;
+  final VoidCallback? onToggleSelected;
 
   @override
   Widget build(BuildContext context) {
+    final card = Card(
+      color: isSelected ? Colors.grey[800] : Colors.grey[850],
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: ListTile(
+        leading: selectionMode
+            ? Checkbox(
+                value: isSelected,
+                onChanged: (_) => onToggleSelected?.call(),
+                activeColor: Colors.tealAccent,
+                checkColor: Colors.black,
+              )
+            : _statusBadge(session.isAttached),
+        title: Text(
+          session.name,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        subtitle: Text(
+          '${AppLocalizations.of(context).windowsCount(session.windowCount)}'
+          ' · ${_formatDate(session.createdAt)}',
+          style: TextStyle(color: Colors.grey[500], fontSize: 12),
+        ),
+        trailing: selectionMode
+            ? null
+            : IconButton(
+                icon: Icon(Icons.edit, color: Colors.grey[400], size: 18),
+                tooltip: AppLocalizations.of(context).rename,
+                onPressed: onRename,
+              ),
+        onTap: selectionMode ? onToggleSelected : onAttach,
+      ),
+    );
+
+    // 選択モード中はスワイプ削除を無効化（選択操作との混乱を避ける）
+    if (selectionMode) return card;
+
     return Dismissible(
       key: Key('tmux_session_${session.name}'),
       direction: DismissDirection.endToStart,
@@ -491,31 +649,7 @@ class _SessionCard extends StatelessWidget {
         onDelete();
         return false; // Handle deletion via dialog
       },
-      child: Card(
-        color: Colors.grey[850],
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: ListTile(
-          leading: _statusBadge(session.isAttached),
-          title: Text(
-            session.name,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          subtitle: Text(
-            '${AppLocalizations.of(context).windowsCount(session.windowCount)}'
-            ' · ${_formatDate(session.createdAt)}',
-            style: TextStyle(color: Colors.grey[500], fontSize: 12),
-          ),
-          trailing: IconButton(
-            icon: Icon(Icons.edit, color: Colors.grey[400], size: 18),
-            tooltip: AppLocalizations.of(context).rename,
-            onPressed: onRename,
-          ),
-          onTap: onAttach,
-        ),
-      ),
+      child: card,
     );
   }
 

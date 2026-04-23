@@ -130,6 +130,8 @@
   "renameSessionTitle": "Ganti Nama Sesi",
   "failedToRenameSession": "Gagal mengganti nama sesi: {error}",
   "openAllSessions": "Buka semua {count} sesi",
+  "selectSessions": "Pilih",
+  "openSelectedSessions": "Buka {count} terpilih",
   "tmuxNotInstalled": "tmux belum diinstal",
   "installTmuxOnServer": "Instal tmux di server Anda:",
   "distroDebianUbuntu": "Debian/Ubuntu",
