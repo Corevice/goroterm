@@ -20,6 +20,8 @@ class QuickActionBar extends StatelessWidget {
     this.onClaudeContinue,
     this.onVoiceInput,
     this.isListening = false,
+    this.onToggleKeyboard,
+    this.keyboardOpen = false,
   });
 
   final void Function(TerminalKey key, {bool ctrl}) onKeyPressed;
@@ -37,6 +39,13 @@ class QuickActionBar extends StatelessWidget {
   final VoidCallback? onVoiceInput;
   final bool isListening;
 
+  /// Toggle the soft keyboard. When provided, a dedicated keyboard button is
+  /// rendered as the **leftmost** action so the user controls keyboard
+  /// visibility explicitly (avoids tab-open layout flash and improves
+  /// long-press copy/paste reliability).
+  final VoidCallback? onToggleKeyboard;
+  final bool keyboardOpen;
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -48,6 +57,13 @@ class QuickActionBar extends StatelessWidget {
           scrollDirection: Axis.horizontal,
           child: Row(
             children: [
+              if (onToggleKeyboard != null) ...[
+                _KeyboardToggleButton(
+                  isOpen: keyboardOpen,
+                  onPressed: onToggleKeyboard!,
+                ),
+                const SizedBox(width: 8),
+              ],
               if (onClaudeCommand != null)
                 _ActionButton(
                   icon: Icons.auto_awesome,
@@ -253,6 +269,29 @@ class _BarButton extends StatelessWidget {
             child: child,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _KeyboardToggleButton extends StatelessWidget {
+  const _KeyboardToggleButton({
+    required this.isOpen,
+    required this.onPressed,
+  });
+
+  final bool isOpen;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return _BarButton(
+      onPressed: onPressed,
+      color: isOpen ? Colors.blue[700] : Colors.grey[800],
+      child: Icon(
+        isOpen ? Icons.keyboard_hide : Icons.keyboard,
+        size: 18,
+        color: Colors.white,
       ),
     );
   }

@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../../core/debug/pty_byte_recorder.dart';
 import '../../core/preferences/power_settings.dart';
 import '../../core/utils/app_logger.dart';
 
@@ -117,6 +121,19 @@ class SettingsScreen extends ConsumerWidget {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
                   builder: (_) => const ConnectionLogScreen(),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.fiber_manual_record_outlined),
+            title: const Text('PTY バイト記録'),
+            subtitle: const Text('描画崩れ再現時に raw bytes をファイルへ保存'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const PtyRecorderScreen(),
                 ),
               );
             },
@@ -455,6 +472,159 @@ class _ConnectionLogScreenState extends State<ConnectionLogScreen> {
                 );
               },
             ),
+    );
+  }
+}
+
+class PtyRecorderScreen extends StatefulWidget {
+  const PtyRecorderScreen({super.key});
+
+  @override
+  State<PtyRecorderScreen> createState() => _PtyRecorderScreenState();
+}
+
+class _PtyRecorderScreenState extends State<PtyRecorderScreen> {
+  List<File> _files = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _loading = true);
+    final files = await PtyByteRecorder.instance.listLogs();
+    if (!mounted) return;
+    setState(() {
+      _files = files;
+      _loading = false;
+    });
+  }
+
+  Future<void> _toggle(bool on) async {
+    if (on) {
+      await PtyByteRecorder.instance.start();
+    } else {
+      await PtyByteRecorder.instance.stop();
+    }
+    await _refresh();
+  }
+
+  Future<void> _share(File file) async {
+    await Share.shareXFiles([XFile(file.path)], text: 'PTY bytes log');
+  }
+
+  Future<void> _deleteAll() async {
+    await PtyByteRecorder.instance.deleteAllLogs();
+    await _refresh();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('ログファイルを全削除しました')),
+    );
+  }
+
+  String _prettySize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = PtyByteRecorder.instance.isEnabled;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('PTY バイト記録'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: '更新',
+            onPressed: _refresh,
+          ),
+          if (_files.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep_outlined),
+              tooltip: 'ログ全削除',
+              onPressed: _deleteAll,
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('記録を開始'),
+                  subtitle: Text(
+                    enabled
+                        ? '記録中。描画崩れを再現したら OFF にして下のログを共有'
+                        : 'ON にすると新規ファイルが作成され PTY 受信バイトが書き込まれます',
+                  ),
+                  value: enabled,
+                  onChanged: (v) async {
+                    await _toggle(v);
+                    setState(() {});
+                  },
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '※ 最大 4 MB に達すると自動停止します。問題再現後は早めに OFF にしてください。',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 0),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '保存済みログ',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _files.isEmpty
+                    ? const Center(child: Text('ログファイルはまだありません'))
+                    : ListView.separated(
+                        itemCount: _files.length,
+                        separatorBuilder: (_, __) => const Divider(height: 0),
+                        itemBuilder: (context, index) {
+                          final f = _files[index];
+                          final size = f.existsSync() ? f.lengthSync() : 0;
+                          final name = f.path.split('/').last;
+                          return ListTile(
+                            leading: const Icon(Icons.description_outlined),
+                            title: Text(
+                              name,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 13,
+                              ),
+                            ),
+                            subtitle: Text(_prettySize(size)),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.share_outlined),
+                              tooltip: '共有',
+                              onPressed: () => _share(f),
+                            ),
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
     );
   }
 }

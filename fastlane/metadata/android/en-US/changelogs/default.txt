@@ -1,1 +1,2 @@
-• New: Tmux session list also shows a loading indicator when Claude Code is running inside the session
+• Change: Soft keyboard no longer opens automatically — use the new keyboard button at the leftmost of the action bar (fixes redraw glitches and improves long-press copy/paste)
+• New: Diagnostic tool to record raw PTY bytes for investigating Claude Code render corruption

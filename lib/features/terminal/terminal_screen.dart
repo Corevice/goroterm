@@ -671,10 +671,11 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
   final _terminalController = TerminalController();
   final _focusNode = FocusNode();
   final _scrollController = ScrollController();
-  /// タブごとにキーボード表示状態を記憶する。
-  /// true ならタブ切り替え時にフォーカスを復元（キーボード表示）する。
+  /// キーボード表示状態。アクションバー左端のキーボードボタンでのみ
+  /// 開閉する（自動 requestFocus を廃止：タブ切替時の描画崩れと
+  /// 長押し選択の取りこぼしを防ぐため）。
   /// viewInsets.bottom で実際のキーボード表示を追跡する。
-  bool _wantKeyboard = true;
+  bool _wantKeyboard = false;
   OverlayEntry? _toolbarOverlay;
   Timer? _toolbarAutoHideTimer;
   ProviderSubscription<SshChannelManager?>? _channelManagerSubscription;
@@ -735,7 +736,8 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       ref
           .read(terminalConnectionProvider(widget.sessionId).notifier)
           .clearNotificationFlag();
-      // 前回の状態に基づいてフォーカスを復元
+      // ユーザーが直前にキーボードを開いていた場合のみ復元する。
+      // 自動オープンはタブ切替時の描画崩れの原因になるため行わない。
       if (_wantKeyboard) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && widget.isActive) {
@@ -774,7 +776,10 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !widget.isActive) return;
       final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-      _wantKeyboard = bottomInset > 0;
+      final next = bottomInset > 0;
+      if (next != _wantKeyboard) {
+        setState(() => _wantKeyboard = next);
+      }
     });
   }
 
@@ -787,6 +792,21 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         _focusNode.requestFocus();
       }
     });
+  }
+
+  /// アクションバー左端のキーボードボタンから呼ばれる。
+  /// `_wantKeyboard` を反転し、フォーカスを取る or 外す。
+  /// `didChangeMetrics` 経由で viewInsets が変わると `_wantKeyboard` も
+  /// 同期されるが、ここで先に状態を確定させる。
+  void _toggleKeyboard() {
+    if (_wantKeyboard) {
+      _wantKeyboard = false;
+      _focusNode.unfocus();
+    } else {
+      _wantKeyboard = true;
+      _focusNode.requestFocus();
+    }
+    if (mounted) setState(() {});
   }
 
   void _onSelectionChanged() {
@@ -1082,16 +1102,10 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       }
     }
 
-    // 接続完了後にフォーカスを確実に要求
-    // （特に新しいタブの場合、didUpdateWidget のタイミングでは
-    //   TerminalView がまだ構築されていない可能性がある）
-    if (mounted && widget.isActive) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && widget.isActive) {
-          _focusNode.requestFocus();
-        }
-      });
-    }
+    // 接続完了後の自動フォーカスは行わない。
+    // ユーザーがアクションバー左端のキーボードボタンで明示的に開く方式に変更。
+    // 自動 requestFocus → ソフトキーボード起動 → resize → 再描画 の連鎖が
+    // 接続直後の描画崩れの主因だったため。
   }
 
   static const _videoExtensions = {
@@ -1475,6 +1489,8 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
           onTextInput: (text) {
             connectionState.terminal?.textInput(text);
           },
+          onToggleKeyboard: _toggleKeyboard,
+          keyboardOpen: _wantKeyboard,
           isSelectMode: _isSelectMode,
           onToggleSelectMode: _toggleSelectMode,
           onClaudeCommand: connectionState.terminal != null

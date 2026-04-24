@@ -1,1 +1,2 @@
-• Baru: Daftar sesi tmux juga menampilkan indikator loading saat Claude Code berjalan di dalam sesi
+• Perubahan: Keyboard tidak lagi terbuka otomatis — gunakan tombol keyboard baru di paling kiri action bar (mengatasi gangguan render & long-press copy/paste)
+• Baru: Alat diagnostik untuk merekam byte PTY mentah untuk menyelidiki gangguan render Claude Code

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xterm/xterm.dart';
 
+import '../../core/debug/pty_byte_recorder.dart';
 import '../../core/error/app_error.dart';
 import '../../core/navigation/navigator_key.dart';
 import '../../core/network/connectivity_monitor.dart';
@@ -282,6 +283,7 @@ class TerminalConnectionNotifier
     _stdoutSubscription = session.stdout.listen(
       (data) {
         _shellOutputReceived = true;
+        PtyByteRecorder.instance.record(arg, data);
         _outputBuffer.write(utf8.decode(data, allowMalformed: true));
         _flushTimer ??= Timer(
           const Duration(milliseconds: 16),
