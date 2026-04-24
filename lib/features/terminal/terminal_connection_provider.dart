@@ -764,6 +764,14 @@ class TerminalConnectionNotifier
       if (_isAppInBackground &&
           !_notificationSent &&
           _outputBytesSinceLastIdle >= _idleNotifyThresholdBytes) {
+        // Claude Code がまだ稼働中（"esc to interrupt" や spinner status が
+        // ターミナルバッファに見えている）なら通知をスキップ。
+        // 次の出力で再びタイマーがアームされ、改めて判定される。
+        final terminal = state.terminal;
+        if (terminal != null && _isClaudeCodeRunning(terminal)) {
+          _outputBytesSinceLastIdle = 0;
+          return;
+        }
         final host = _config?.host ?? 'server';
         // セッションマネージャからタブ名を取得
         final sessions = ref.read(sessionManagerProvider).sessions;
@@ -781,6 +789,35 @@ class TerminalConnectionNotifier
       _outputBytesSinceLastIdle = 0;
     });
   }
+
+  /// ターミナルバッファ末尾を見て Claude Code が稼働中か判定する。
+  ///
+  /// 検出シグナル（どれか 1 つでもマッチで稼働中とみなす）:
+  /// - "esc to interrupt" — Claude Code が中断可能な処理を実行中だけ表示
+  /// - spinner 行の "tokens" — Forming…/Thinking… 等の進捗ステータスに含まれる
+  /// - "Tip: Use /xxx" — Claude Code 稼働中に出るローテーションヒント
+  static bool _isClaudeCodeRunning(Terminal terminal) {
+    final lines = terminal.buffer.lines;
+    final n = lines.length;
+    if (n == 0) return false;
+    // 末尾 ~12 行をスキャン（spinner はビューポート末尾付近に出る）
+    final start = (n - 12).clamp(0, n);
+    for (var y = start; y < n; y++) {
+      final text = lines[y].getText();
+      if (text.contains('esc to interrupt')) return true;
+      if (text.contains('tokens') &&
+          _spinnerVerbPattern.hasMatch(text)) {
+        return true;
+      }
+      if (text.contains('Tip: Use /')) return true;
+    }
+    return false;
+  }
+
+  /// Claude Code spinner 行の verb…(動名詞 + 三点リーダ) を検出。
+  /// 例: "* Forming…", "* Thinking…", "● Pondering…"
+  static final RegExp _spinnerVerbPattern =
+      RegExp(r'\w+(ing|ed)\s*[…\.]');
 
   /// Terminal.onOutput コールバック。
   void _onTerminalOutput(String data) {

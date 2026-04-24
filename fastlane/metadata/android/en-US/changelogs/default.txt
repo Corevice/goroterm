@@ -1,5 +1,5 @@
-• New: Quick button to resume the last Claude Code session (🕐 icon → claude --continue)
-• New: Select specific tmux sessions to open in bulk (tap "Select" → check desired sessions)
-• Fix: "Refresh Screen" button now actually forces redraw
-• Fix: First character lost after switching tabs
-• Fix: Japanese IME prediction truncation / segment spacing
+• Fix: Suppress false "Claude Code finished" notifications while Claude is still thinking (detects spinner / "esc to interrupt")
+• New: Quick button to resume last Claude Code session (🕐 → claude --continue)
+• New: Select specific tmux sessions to open in bulk
+• Fix: "Refresh Screen" button works / First character lost after tab switch
+• Fix: Japanese IME prediction / segment spacing
