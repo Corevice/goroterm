@@ -1,5 +1,1 @@
-• Baru: Indikator loading kecil pada tab saat Claude Code berjalan
-• Perbaikan: Menekan notifikasi "Claude Code selesai" palsu saat masih berjalan
-• Baru: Tombol cepat untuk melanjutkan sesi Claude Code terakhir
-• Baru: Pilih sesi tmux tertentu untuk dibuka secara massal
-• Perbaikan: Tombol Segarkan Layar / karakter pertama hilang setelah ganti tab / masalah IME Jepang
+• Baru: Daftar sesi tmux juga menampilkan indikator loading saat Claude Code berjalan di dalam sesi

@@ -5,6 +5,7 @@ class TmuxSession {
     required this.windowCount,
     required this.isAttached,
     required this.createdAt,
+    this.claudeRunning = false,
   });
 
   final String name;
@@ -12,10 +13,23 @@ class TmuxSession {
   final bool isAttached;
   final DateTime createdAt;
 
+  /// Claude Code がこの tmux セッションで稼働中かどうか。
+  /// `tmux capture-pane` の出力から spinner / "esc to interrupt" 等を検知。
+  final bool claudeRunning;
+
+  TmuxSession copyWith({bool? claudeRunning}) => TmuxSession(
+        name: name,
+        windowCount: windowCount,
+        isAttached: isAttached,
+        createdAt: createdAt,
+        claudeRunning: claudeRunning ?? this.claudeRunning,
+      );
+
   @override
   String toString() =>
       'TmuxSession(name: $name, windows: $windowCount, '
-      'attached: $isAttached, created: $createdAt)';
+      'attached: $isAttached, created: $createdAt, '
+      'claudeRunning: $claudeRunning)';
 
   @override
   bool operator ==(Object other) =>
@@ -24,10 +38,12 @@ class TmuxSession {
           name == other.name &&
           windowCount == other.windowCount &&
           isAttached == other.isAttached &&
-          createdAt == other.createdAt;
+          createdAt == other.createdAt &&
+          claudeRunning == other.claudeRunning;
 
   @override
-  int get hashCode => Object.hash(name, windowCount, isAttached, createdAt);
+  int get hashCode =>
+      Object.hash(name, windowCount, isAttached, createdAt, claudeRunning);
 }
 
 /// Whether tmux is installed on the remote server.

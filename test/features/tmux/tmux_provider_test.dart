@@ -2250,6 +2250,12 @@ void main() {
         async.elapse(const Duration(seconds: 2));
         async.flushMicrotasks();
 
+        // _fetchSessions then calls _detectClaudeRunningPerSession, which issues
+        // another exec command hitting the same hanging session — advance another
+        // 2 s to let its close-ACK timeout fire as well.
+        async.elapse(const Duration(seconds: 2));
+        async.flushMicrotasks();
+
         // With the fix the TimeoutException is caught and _fetchSessions
         // returns the sessions, so state must reflect the parsed session.
         final state = container.read(tmuxProvider('done-timeout-test'));

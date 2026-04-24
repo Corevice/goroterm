@@ -282,8 +282,99 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
         ),
       ));
     }
+
+    // 各セッションの全 pane を capture-pane して Claude 稼働状態を判定。
+    // 失敗してもセッション一覧自体には影響させない（best-effort）。
+    if (sessions.isNotEmpty) {
+      final claudeMap =
+          await _detectClaudeRunningPerSession(channelManager, sessions);
+      return [
+        for (final s in sessions)
+          s.copyWith(claudeRunning: claudeMap[s.name] ?? false),
+      ];
+    }
     return sessions;
   }
+
+  /// 各 tmux セッションの全 pane の見える内容を取得し、
+  /// Claude Code 稼働中シグナル（spinner / "esc to interrupt" / Tip）を検出。
+  /// セッション名 → 稼働中 bool のマップを返す。
+  Future<Map<String, bool>> _detectClaudeRunningPerSession(
+    SshChannelManager channelManager,
+    List<TmuxSession> sessions,
+  ) async {
+    // 区切りマーカーで各セッションの出力を 1 回の SSH exec にまとめる。
+    const sessionMarker = '=GoroSess:';
+    final cmds = sessions.map((s) {
+      final name = shellQuote(s.name);
+      return "echo '$sessionMarker${s.name}'; "
+          "tmux list-panes -s -t $name -F '#{pane_id}' 2>/dev/null | "
+          "while read p; do tmux capture-pane -t \"\$p\" -p -S -15 2>/dev/null; done";
+    }).join('; ');
+
+    try {
+      final (output, _, _) = await _runCommand(
+        channelManager,
+        cmds,
+        timeout: const Duration(seconds: 8),
+      );
+      return _parseClaudeRunningOutput(output, sessionMarker);
+    } catch (e) {
+      AppLogger.instance.log('tmux capture-pane failed: $e');
+      return const {};
+    }
+  }
+
+  /// `_detectClaudeRunningPerSession` の出力をパース。
+  /// テスト容易性のため別メソッドに切り出し。
+  static Map<String, bool> _parseClaudeRunningOutput(
+    String output,
+    String marker,
+  ) {
+    final map = <String, bool>{};
+    String? currentSession;
+    final buf = StringBuffer();
+
+    void flush() {
+      final s = currentSession;
+      if (s != null) {
+        map[s] = _bufferLooksLikeClaudeRunning(buf.toString());
+        buf.clear();
+      }
+    }
+
+    for (final line in output.split('\n')) {
+      if (line.startsWith(marker)) {
+        flush();
+        currentSession = line.substring(marker.length);
+      } else {
+        buf.writeln(line);
+      }
+    }
+    flush();
+    return map;
+  }
+
+  /// バッファ末尾を見て Claude Code 稼働中シグナルを検出。
+  /// terminal_connection_provider.dart の判定と同等。
+  static bool _bufferLooksLikeClaudeRunning(String text) {
+    if (text.isEmpty) return false;
+    final lines = text.split('\n');
+    final start = (lines.length - 12).clamp(0, lines.length);
+    for (var i = start; i < lines.length; i++) {
+      final line = lines[i];
+      if (line.contains('esc to interrupt')) return true;
+      if (line.contains('tokens') && _spinnerVerbPattern.hasMatch(line)) {
+        return true;
+      }
+      if (line.contains('Tip: Use /')) return true;
+    }
+    return false;
+  }
+
+  /// `Forming…`, `Thinking…`, `Pondering…` 等の動名詞 + 三点リーダパターン。
+  static final RegExp _spinnerVerbPattern =
+      RegExp(r'\w+(ing|ed)\s*[…\.]');
 
   /// Runs a command via exec channel and collects stdout, stderr, and exit code.
   /// Throws [TimeoutException] if the command does not complete within [timeout].

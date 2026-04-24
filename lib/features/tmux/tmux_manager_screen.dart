@@ -610,12 +610,31 @@ class _SessionCard extends StatelessWidget {
                 checkColor: Colors.black,
               )
             : _statusBadge(session.isAttached),
-        title: Text(
-          session.name,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w500,
-          ),
+        title: Row(
+          children: [
+            if (session.claudeRunning)
+              const Padding(
+                padding: EdgeInsets.only(right: 6),
+                child: SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: Colors.tealAccent,
+                  ),
+                ),
+              ),
+            Flexible(
+              child: Text(
+                session.name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
         ),
         subtitle: Text(
           '${AppLocalizations.of(context).windowsCount(session.windowCount)}'
