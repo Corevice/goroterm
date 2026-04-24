@@ -1,5 +1,5 @@
-• Fix: Suppress false "Claude Code finished" notifications while Claude is still thinking (detects spinner / "esc to interrupt")
-• New: Quick button to resume last Claude Code session (🕐 → claude --continue)
+• New: Small loading indicator on tabs when Claude Code is running
+• Fix: Suppress false "Claude Code finished" notifications while still running
+• New: Quick button to resume last Claude Code session
 • New: Select specific tmux sessions to open in bulk
-• Fix: "Refresh Screen" button works / First character lost after tab switch
-• Fix: Japanese IME prediction / segment spacing
+• Fix: Refresh Screen button / first character lost after tab switch / Japanese IME issues

@@ -564,6 +564,7 @@ class _TabStripState extends State<_TabStrip> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    _ClaudeRunningIndicator(sessionId: session.sessionId),
                     Text(
                       session.label,
                       style: TextStyle(
@@ -603,6 +604,35 @@ class _TabStripState extends State<_TabStrip> {
                   child: dragChild,
                 );
         },
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+/// タブ内に Claude Code 稼働中の小さな spinner を表示する。
+/// 非稼働時は何も描画しない（横幅 0）。
+class _ClaudeRunningIndicator extends ConsumerWidget {
+  const _ClaudeRunningIndicator({required this.sessionId});
+
+  final String sessionId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final running = ref.watch(
+      terminalConnectionProvider(sessionId).select((s) => s.claudeRunning),
+    );
+    if (!running) return const SizedBox.shrink();
+    return const Padding(
+      padding: EdgeInsets.only(right: 6),
+      child: SizedBox(
+        width: 10,
+        height: 10,
+        child: CircularProgressIndicator(
+          strokeWidth: 1.5,
+          color: Colors.tealAccent,
+        ),
       ),
     );
   }

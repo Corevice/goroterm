@@ -1,5 +1,5 @@
-• Perbaikan: Menekan notifikasi "Claude Code selesai" palsu saat Claude masih berpikir (deteksi spinner / "esc to interrupt")
-• Baru: Tombol cepat untuk melanjutkan sesi Claude Code terakhir (🕐 → claude --continue)
+• Baru: Indikator loading kecil pada tab saat Claude Code berjalan
+• Perbaikan: Menekan notifikasi "Claude Code selesai" palsu saat masih berjalan
+• Baru: Tombol cepat untuk melanjutkan sesi Claude Code terakhir
 • Baru: Pilih sesi tmux tertentu untuk dibuka secara massal
-• Perbaikan: Tombol "Segarkan Layar" / karakter pertama hilang setelah ganti tab
-• Perbaikan: Prediksi IME Jepang / spasi antar segmen
+• Perbaikan: Tombol Segarkan Layar / karakter pertama hilang setelah ganti tab / masalah IME Jepang

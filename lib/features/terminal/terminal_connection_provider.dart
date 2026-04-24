@@ -34,6 +34,7 @@ class TerminalConnectionState {
     this.errorMessage,
     this.channelManager,
     this.shellExited = false,
+    this.claudeRunning = false,
   });
 
   final ConnectionStatus status;
@@ -46,6 +47,11 @@ class TerminalConnectionState {
   /// `exit` コマンド等でシェルが終了すると true になる。
   final bool shellExited;
 
+  /// Claude Code がこのセッションで稼働中かどうか。
+  /// バッファ末尾の spinner 行 / "esc to interrupt" 等を周期検査して更新する。
+  /// タブストリップに小さなローディングインジケータを出すために使用。
+  final bool claudeRunning;
+
   TerminalConnectionState copyWith({
     ConnectionStatus? status,
     Terminal? terminal,
@@ -55,6 +61,7 @@ class TerminalConnectionState {
     bool clearChannelManager = false,
     bool clearErrorMessage = false,
     bool? shellExited,
+    bool? claudeRunning,
   }) {
     return TerminalConnectionState(
       status: status ?? this.status,
@@ -66,6 +73,7 @@ class TerminalConnectionState {
           ? null
           : (channelManager ?? this.channelManager),
       shellExited: shellExited ?? this.shellExited,
+      claudeRunning: claudeRunning ?? this.claudeRunning,
     );
   }
 }
@@ -841,6 +849,31 @@ class TerminalConnectionNotifier
       clearErrorMessage: true,
       shellExited: false,
     );
+    _startClaudeDetectTimer();
+  }
+
+  /// Claude Code 稼働状態を周期的に検出するタイマー。
+  /// 1.5 秒ごとにバッファ末尾を見て state.claudeRunning を更新する。
+  Timer? _claudeDetectTimer;
+
+  void _startClaudeDetectTimer() {
+    _claudeDetectTimer?.cancel();
+    _claudeDetectTimer = Timer.periodic(
+      const Duration(milliseconds: 1500),
+      (_) {
+        final terminal = state.terminal;
+        if (terminal == null) return;
+        final running = _isClaudeCodeRunning(terminal);
+        if (running != state.claudeRunning) {
+          state = state.copyWith(claudeRunning: running);
+        }
+      },
+    );
+  }
+
+  void _stopClaudeDetectTimer() {
+    _claudeDetectTimer?.cancel();
+    _claudeDetectTimer = null;
   }
 
   void _cleanupConnections() {
@@ -848,6 +881,7 @@ class TerminalConnectionNotifier
     _keepAliveFailCount = 0;
     _shellOutputReceived = false;
     resetIdleCounter();
+    _stopClaudeDetectTimer();
     _flushTimer?.cancel();
     _flushTimer = null;
     _resizeGuardTimer?.cancel();
