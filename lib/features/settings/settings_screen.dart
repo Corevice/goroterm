@@ -19,6 +19,7 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final fontSize = ref.watch(fontSizeProvider);
+    final selectedLocale = ref.watch(localeProvider);
     final l = AppLocalizations.of(context);
 
     return Scaffold(
@@ -30,6 +31,27 @@ class SettingsScreen extends ConsumerWidget {
       ),
       body: ListView(
         children: [
+          // Language section
+          _SectionHeader(title: l.language),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: DropdownButton<String>(
+              isExpanded: true,
+              value: selectedLocale?.languageCode ?? '',
+              items: [
+                DropdownMenuItem(value: '', child: Text(l.languageSystem)),
+                DropdownMenuItem(value: 'en', child: Text(l.languageEnglish)),
+                DropdownMenuItem(value: 'ja', child: Text(l.languageJapanese)),
+                DropdownMenuItem(value: 'id', child: Text(l.languageIndonesian)),
+              ],
+              onChanged: (code) {
+                ref.read(localeProvider.notifier).setLocale(
+                      code == null || code.isEmpty ? null : Locale(code),
+                    );
+              },
+            ),
+          ),
+
           // Theme section
           _SectionHeader(title: l.appearance),
           Semantics(

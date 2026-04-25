@@ -209,5 +209,11 @@
   "noLogsYet": "ログはまだありません。\nSSH サーバーに接続すると診断情報が表示されます。",
 
   "updateReady": "アップデートの準備ができました",
-  "restartToApply": "再起動して適用"
+  "restartToApply": "再起動して適用",
+
+  "language": "言語",
+  "languageSystem": "システム設定に従う",
+  "languageEnglish": "English",
+  "languageJapanese": "日本語",
+  "languageIndonesian": "Bahasa Indonesia"
 }

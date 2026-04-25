@@ -209,5 +209,11 @@
   "noLogsYet": "Belum ada log.\nSambungkan ke server SSH untuk melihat diagnostik.",
 
   "updateReady": "Pembaruan siap",
-  "restartToApply": "Restart untuk menerapkan"
+  "restartToApply": "Restart untuk menerapkan",
+
+  "language": "Bahasa",
+  "languageSystem": "Ikuti sistem",
+  "languageEnglish": "English",
+  "languageJapanese": "日本語",
+  "languageIndonesian": "Bahasa Indonesia"
 }

@@ -245,5 +245,11 @@
   "noLogsYet": "No logs yet.\nConnect to an SSH server to see diagnostics.",
 
   "updateReady": "Update ready",
-  "restartToApply": "Restart to apply"
+  "restartToApply": "Restart to apply",
+
+  "language": "Language",
+  "languageSystem": "System default",
+  "languageEnglish": "English",
+  "languageJapanese": "日本語",
+  "languageIndonesian": "Bahasa Indonesia"
 }

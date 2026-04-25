@@ -16,6 +16,7 @@ class TerminalSshApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
+    final locale = ref.watch(localeProvider);
 
     ThemeData? theme;
     ThemeData? darkTheme;
@@ -42,6 +43,7 @@ class TerminalSshApp extends ConsumerWidget {
       theme: theme,
       darkTheme: darkTheme,
       themeMode: materialThemeMode,
+      locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       initialRoute: '/',

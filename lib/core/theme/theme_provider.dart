@@ -1,8 +1,10 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 const _fontSizeKey = 'pref_font_size';
 const _themeKey = 'pref_theme_mode';
+const _localeKey = 'pref_locale';
 
 /// Provides the [FlutterSecureStorage] instance used by theme/font providers.
 /// Override in tests to avoid platform-channel calls.
@@ -112,4 +114,46 @@ class FontSizeNotifier extends Notifier<double> {
 
 final fontSizeProvider = NotifierProvider<FontSizeNotifier, double>(
   FontSizeNotifier.new,
+);
+
+/// User-selected locale. `null` = follow system locale.
+class LocaleNotifier extends Notifier<Locale?> {
+  late final FlutterSecureStorage _storage;
+
+  @override
+  Locale? build() {
+    _storage = ref.read(themeStorageProvider);
+    _loadFromStorage();
+    return null;
+  }
+
+  Future<void> _loadFromStorage() async {
+    try {
+      final value = await _storage.read(key: _localeKey);
+      if (value != null && value.isNotEmpty) {
+        state = Locale(value);
+      }
+    } catch (_) {
+      // テスト環境等でプラットフォームチャネルが使えない場合は無視
+    }
+  }
+
+  void setLocale(Locale? locale) {
+    state = locale;
+    _save(locale);
+  }
+
+  Future<void> _save(Locale? locale) async {
+    try {
+      if (locale == null) {
+        await _storage.delete(key: _localeKey);
+      } else {
+        await _storage.write(key: _localeKey, value: locale.languageCode);
+      }
+    } catch (_) {}
+  }
+}
+
+final localeProvider = NotifierProvider<LocaleNotifier, Locale?>(
+  LocaleNotifier.new,
 );
