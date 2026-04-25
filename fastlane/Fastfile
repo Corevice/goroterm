@@ -44,11 +44,12 @@ platform :ios do
     )
   end
 
-  desc "Upload IPA to TestFlight"
+  desc "Upload IPA to TestFlight (set IOS_WAIT_FOR_PROCESSING=true to block until processed)"
   lane :deploy do
+    skip_wait = ENV["IOS_WAIT_FOR_PROCESSING"] != "true"
     upload_to_testflight(
       api_key: asc_api_key,
-      skip_waiting_for_build_processing: true,
+      skip_waiting_for_build_processing: skip_wait,
       ipa: "build/ios/ipa/GoroTerm.ipa",
     )
   end
@@ -69,16 +70,21 @@ platform :ios do
   end
 
   # App Store 審査提出。メタデータ更新 + 最新 TestFlight ビルドを使って submit。
-  # スクリーンショットは別途 App Store Connect 側で揃えておくこと。
+  # 前提: deploy lane を IOS_WAIT_FOR_PROCESSING=true で実行済み (= 最新ビルドが
+  # ASC で processing 完了している状態)。
+  # 環境変数 IOS_AUTOMATIC_RELEASE=true なら承認後に自動公開。
   desc "Submit latest TestFlight build to App Store review"
   lane :submit_review do
+    auto_release = ENV["IOS_AUTOMATIC_RELEASE"] == "true"
+    UI.message("Automatic release after approval: #{auto_release}")
+
     deliver(
       api_key: asc_api_key,
       metadata_path: "./fastlane/metadata/ios",
       skip_binary_upload: true,
       skip_screenshots: true,
       submit_for_review: true,
-      automatic_release: false,    # 承認後の公開タイミングは手動
+      automatic_release: auto_release,
       force: true,
       precheck_include_in_app_purchases: false,
       submission_information: {
@@ -119,15 +125,27 @@ platform :mac do
     dmg_path = "#{out_dir}/Goroterm-#{version}.dmg"
     sh("rm -f ../#{dmg_path}")
 
-    # DMG 中身を整える: .app + /Applications シンボリックリンクで
-    # 「Applications フォルダへドラッグ」UI にする。
+    # DMG 作成: create-dmg でアイコン配置と Applications ドロップリンク付き UI を生成。
+    # --app-drop-link でシンボリックリンクと位置を一発指定、--volicon でボリュームの
+    # アイコンも 1024px PNG に統一する。
     stage = "../build/macos/dmg-stage"
     sh("rm -rf '#{stage}' && mkdir -p '#{stage}'")
     sh("cp -R '../#{app_path}' '#{stage}/Goroterm.app'")
-    sh("ln -s /Applications '#{stage}/Applications'")
 
-    # DMG 作成 (UDZO = 圧縮)。
-    sh("hdiutil create -volname 'Goroterm' -srcfolder '#{stage}' -ov -format UDZO '../#{dmg_path}'")
+    icon = "macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png"
+    sh(<<~CMD.strip.gsub(/\s+/, ' '))
+      create-dmg
+        --volname 'Goroterm'
+        --volicon '../#{icon}'
+        --window-pos 200 120
+        --window-size 660 420
+        --icon-size 128
+        --icon 'Goroterm.app' 165 200
+        --hide-extension 'Goroterm.app'
+        --app-drop-link 495 200
+        --no-internet-enable
+        '../#{dmg_path}' '#{stage}'
+    CMD
     sh("rm -rf '#{stage}'")
 
     # DMG 自身も Developer ID で署名 (Gatekeeper 検証を高速化)

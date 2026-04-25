@@ -37,6 +37,9 @@ jobs:
       - name: Install CocoaPods dependencies
         run: cd macos && pod install
 
+      - name: Install create-dmg
+        run: brew install create-dmg
+
       - name: Install Developer ID certificate
         env:
           MACOS_DEVELOPER_ID_CERT_P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_P12_BASE64 }}
