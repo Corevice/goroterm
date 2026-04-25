@@ -119,8 +119,16 @@ platform :mac do
     dmg_path = "#{out_dir}/Goroterm-#{version}.dmg"
     sh("rm -f ../#{dmg_path}")
 
-    # DMG 作成 (UDZO = 圧縮)。中身は signed/hardened な .app のみ。
-    sh("hdiutil create -volname 'Goroterm' -srcfolder '../#{app_path}' -ov -format UDZO '../#{dmg_path}'")
+    # DMG 中身を整える: .app + /Applications シンボリックリンクで
+    # 「Applications フォルダへドラッグ」UI にする。
+    stage = "../build/macos/dmg-stage"
+    sh("rm -rf '#{stage}' && mkdir -p '#{stage}'")
+    sh("cp -R '../#{app_path}' '#{stage}/Goroterm.app'")
+    sh("ln -s /Applications '#{stage}/Applications'")
+
+    # DMG 作成 (UDZO = 圧縮)。
+    sh("hdiutil create -volname 'Goroterm' -srcfolder '#{stage}' -ov -format UDZO '../#{dmg_path}'")
+    sh("rm -rf '#{stage}'")
 
     # DMG 自身も Developer ID で署名 (Gatekeeper 検証を高速化)
     signing_identity = ENV["MACOS_SIGNING_IDENTITY"] || "Developer ID Application"
