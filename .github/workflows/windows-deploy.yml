@@ -1,0 +1,52 @@
+name: Windows Deploy
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.4'
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows (Release)
+        run: flutter build windows --release
+
+      - name: Package as ZIP
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)').Matches[0].Groups[1].Value
+          $version = $version -replace '\+.*$', ''
+          $src = 'build\windows\x64\runner\Release'
+          $out = 'build\windows\release'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $zip = "$out\Goroterm-Windows-$version.zip"
+          if (Test-Path $zip) { Remove-Item $zip }
+          Compress-Archive -Path "$src\*" -DestinationPath $zip
+          Get-Item $zip | Select-Object FullName, Length
+
+      - name: Upload ZIP to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/windows/release/Goroterm-Windows-*.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
