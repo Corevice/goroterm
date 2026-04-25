@@ -1,2 +1,1 @@
-• Perubahan: Keyboard tidak lagi terbuka otomatis — gunakan tombol keyboard baru di paling kiri action bar (mengatasi gangguan render & long-press copy/paste)
-• Baru: Alat diagnostik untuk merekam byte PTY mentah untuk menyelidiki gangguan render Claude Code
+• Baru: Port Tunnels — buka SSH local port forwarding ke kontainer Docker atau host apa pun yang dapat diakses dari server SSH, melalui tab "Tunnels" baru di drawer kanan. Beberapa tunnel dapat berjalan bersamaan dan otomatis pulih saat koneksi ulang.

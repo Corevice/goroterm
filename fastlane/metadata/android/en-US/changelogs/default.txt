@@ -1,2 +1,1 @@
-• Change: Soft keyboard no longer opens automatically — use the new keyboard button at the leftmost of the action bar (fixes redraw glitches and improves long-press copy/paste)
-• New: Diagnostic tool to record raw PTY bytes for investigating Claude Code render corruption
+• New: Port Tunnels — open SSH local port forwards to Docker containers (or any host the SSH server can reach) from the new "Tunnels" tab in the right drawer. Multiple tunnels run in parallel and auto-restore on reconnect.

@@ -25,6 +25,8 @@ import '../file_browser/file_browser_provider.dart';
 import '../file_browser/file_browser_screen.dart';
 import '../tmux/tmux_manager_screen.dart';
 import '../tmux/tmux_provider.dart';
+import '../tunnels/tunnel_manager_screen.dart';
+import '../tunnels/tunnel_provider.dart';
 import '../../widgets/quick_action_bar.dart';
 import '../../core/utils/app_logger.dart';
 import '../../core/utils/shell_utils.dart';
@@ -282,18 +284,42 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
               );
         }
       },
-      // Right drawer (left-swipe): tmux Session Manager for active session
+      // Right drawer (left-swipe): tmux Sessions + Port Tunnels (tabbed)
       endDrawer: Drawer(
         width: MediaQuery.of(context).size.width * 0.85,
         backgroundColor: Colors.grey[900],
         child: SafeArea(
-          child: TmuxManagerScreen(
-            connectionId: activeSession.sessionId,
-            onAttachSession: (tmuxSessionName) {
-              // Drawer は _SessionListView 側の Navigator.pop() で閉じられる
-              // ここで pop すると TerminalScreen 自体が pop されてしまう
-              _attachTmuxSession(activeSession.connectionId, tmuxSessionName);
-            },
+          child: DefaultTabController(
+            length: 2,
+            child: Column(
+              children: [
+                TabBar(
+                  labelColor: Colors.white,
+                  unselectedLabelColor: Colors.white54,
+                  indicatorColor: Colors.lightBlueAccent,
+                  tabs: [
+                    Tab(icon: const Icon(Icons.view_list, size: 18), text: l.tmuxSessions),
+                    const Tab(icon: Icon(Icons.swap_horiz, size: 18), text: 'Tunnels'),
+                  ],
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      TmuxManagerScreen(
+                        connectionId: activeSession.sessionId,
+                        onAttachSession: (tmuxSessionName) {
+                          _attachTmuxSession(
+                            activeSession.connectionId,
+                            tmuxSessionName,
+                          );
+                        },
+                      ),
+                      TunnelManagerScreen(sessionId: activeSession.sessionId),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -708,6 +734,9 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
               .setChannelManager(next);
           ref
               .read(fileBrowserProvider(widget.sessionId).notifier)
+              .setChannelManager(next);
+          ref
+              .read(tunnelProvider(widget.sessionId).notifier)
               .setChannelManager(next);
         },
         fireImmediately: true,
