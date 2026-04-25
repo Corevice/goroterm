@@ -4,6 +4,16 @@
 *.pyc
 *.swp
 .DS_Store
+
+# Signing certificates / API keys / passwords (never commit)
+private/
+*.p12
+*.p8
+*.mobileprovision
+*.certSigningRequest
+
+# Screenshot working directory (raw captures, masked exports)
+screenshots/
 .atom/
 .build/
 .buildlog/
