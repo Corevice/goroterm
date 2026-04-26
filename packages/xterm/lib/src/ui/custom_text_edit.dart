@@ -233,7 +233,16 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
     // --- composing 終了 or 通常入力 ---
     widget.onComposing(null);
 
-    final text = _currentEditingState.text;
+    // macOS の Live Conversion / Inline Predictive Text は確定後に
+    // カーソルより後ろにプレビュー文字を残すケースがある
+    // (例: 「今の挙動はどんな感じ」確定時に text="今の挙動はどんな感じ感じ"
+    //  sel=10..10 になり、最後の「感じ」は IME の予測表示にすぎない)。
+    // カーソル位置 selection.end までを実際の確定テキストとして扱う。
+    final fullText = _currentEditingState.text;
+    final selEnd = _currentEditingState.selection.end;
+    final text = (selEnd >= 0 && selEnd <= fullText.length)
+        ? fullText.substring(0, selEnd)
+        : fullText;
 
     // 削除検出（バッファが短くなった → backspace）
     if (text.length < _sentBase.length) {
