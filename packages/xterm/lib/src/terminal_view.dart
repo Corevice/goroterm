@@ -301,6 +301,7 @@ class TerminalViewState extends State<TerminalView> {
       terminalController: _controller,
       onTapUp: _onTapUp,
       onTapDown: _onTapDown,
+      onSingleTapUp: _onSingleTapUp,
       onSecondaryTapDown:
           widget.onSecondaryTapDown != null ? _onSecondaryTapDown : null,
       onSecondaryTapUp:
@@ -349,12 +350,16 @@ class TerminalViewState extends State<TerminalView> {
   void _onTapDown(_) {
     if (_controller.selection != null) {
       _controller.clearSelection();
+    }
+    // Keyboard opening moved to _onSingleTapUp so that long-press
+    // doesn't trigger a keyboard flash-open-then-close.
+  }
+
+  void _onSingleTapUp(TapUpDetails details) {
+    if (!widget.hardwareKeyboardOnly) {
+      _customTextEditKey.currentState?.requestKeyboard();
     } else {
-      if (!widget.hardwareKeyboardOnly) {
-        _customTextEditKey.currentState?.requestKeyboard();
-      } else {
-        _focusNode.requestFocus();
-      }
+      _focusNode.requestFocus();
     }
   }
 
