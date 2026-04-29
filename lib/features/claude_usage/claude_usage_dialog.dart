@@ -104,6 +104,12 @@ if not token:
 sub_type = oauth.get('subscriptionType', 'unknown')
 rate_tier = oauth.get('rateLimitTier', 'unknown')
 
+# Extract non-sensitive account info from credentials
+account = {}
+for key in ('email', 'name', 'sub', 'preferred_username'):
+    if key in oauth:
+        account[key] = oauth[key]
+
 req = urllib.request.Request(
     'https://api.anthropic.com/api/oauth/usage',
     headers={
@@ -126,6 +132,7 @@ except Exception as e:
 result = {
     'subscription': sub_type,
     'rateLimitTier': rate_tier,
+    'account': account,
     'usage': usage,
 }
 print(json.dumps(result))
@@ -239,6 +246,46 @@ print(json.dumps(result))
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // アカウント情報
+        if (usage.accountName != null || usage.accountEmail != null) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.grey[900]?.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (usage.accountName != null)
+                  Row(
+                    children: [
+                      Icon(Icons.person_outline,
+                          color: Colors.white54, size: 16),
+                      const SizedBox(width: 8),
+                      Text(usage.accountName!,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 14)),
+                    ],
+                  ),
+                if (usage.accountEmail != null) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.email_outlined,
+                          color: Colors.white54, size: 16),
+                      const SizedBox(width: 8),
+                      Text(usage.accountEmail!,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13)),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         // サブスクリプション情報
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -407,6 +454,8 @@ print(json.dumps(result))
 class _UsageData {
   _UsageData({
     required this.subscription,
+    this.accountEmail,
+    this.accountName,
     this.fiveHour,
     this.sevenDay,
     this.sevenDayOpus,
@@ -417,6 +466,8 @@ class _UsageData {
   });
 
   final String subscription;
+  final String? accountEmail;
+  final String? accountName;
   final _LimitInfo? fiveHour;
   final _LimitInfo? sevenDay;
   final _LimitInfo? sevenDayOpus;
@@ -427,8 +478,11 @@ class _UsageData {
 
   factory _UsageData.fromJson(Map<String, dynamic> json) {
     final usage = json['usage'] as Map<String, dynamic>? ?? {};
+    final account = json['account'] as Map<String, dynamic>? ?? {};
     return _UsageData(
       subscription: json['subscription'] as String? ?? 'unknown',
+      accountEmail: account['email'] as String?,
+      accountName: account['name'] as String? ?? account['preferred_username'] as String?,
       fiveHour: _LimitInfo.fromJson(usage['five_hour']),
       sevenDay: _LimitInfo.fromJson(usage['seven_day']),
       sevenDayOpus: _LimitInfo.fromJson(usage['seven_day_opus']),
