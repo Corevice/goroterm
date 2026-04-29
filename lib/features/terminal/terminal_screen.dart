@@ -1021,6 +1021,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     }
 
     setState(() => _isListening = true);
+    final voiceLang = ref.read(voiceInputLanguageProvider);
     _speech.listen(
       onResult: (result) {
         if (result.finalResult && result.recognizedWords.isNotEmpty) {
@@ -1032,7 +1033,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       listenOptions: stt.SpeechListenOptions(
         listenMode: stt.ListenMode.dictation,
       ),
-      localeId: 'ja_JP',
+      localeId: voiceLang.localeId.isEmpty ? null : voiceLang.localeId,
     );
   }
 

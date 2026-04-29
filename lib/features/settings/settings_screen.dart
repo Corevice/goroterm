@@ -8,9 +8,8 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../core/debug/pty_byte_recorder.dart';
 import '../../core/preferences/power_settings.dart';
-import '../../core/utils/app_logger.dart';
-
 import '../../core/theme/theme_provider.dart';
+import '../../core/utils/app_logger.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -121,6 +120,33 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ),
               ],
+            ),
+          ),
+
+          // Voice input language section
+          _SectionHeader(title: l.voiceInput),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: DropdownButton<VoiceInputLanguage>(
+              isExpanded: true,
+              value: ref.watch(voiceInputLanguageProvider),
+              items: [
+                DropdownMenuItem(
+                    value: VoiceInputLanguage.autoDetect,
+                    child: Text(l.voiceInputAutoDetect)),
+                DropdownMenuItem(
+                    value: VoiceInputLanguage.japanese,
+                    child: Text(l.voiceInputJapanese)),
+                DropdownMenuItem(
+                    value: VoiceInputLanguage.english,
+                    child: Text(l.voiceInputEnglish)),
+              ],
+              onChanged: (lang) {
+                if (lang != null) {
+                  ref.read(voiceInputLanguageProvider.notifier)
+                      .setLanguage(lang);
+                }
+              },
             ),
           ),
 

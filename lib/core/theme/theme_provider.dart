@@ -157,3 +157,56 @@ class LocaleNotifier extends Notifier<Locale?> {
 final localeProvider = NotifierProvider<LocaleNotifier, Locale?>(
   LocaleNotifier.new,
 );
+
+/// Voice input recognition language for speech-to-text.
+enum VoiceInputLanguage {
+  autoDetect(''),
+  japanese('ja_JP'),
+  english('en_US');
+
+  const VoiceInputLanguage(this.localeId);
+  final String localeId;
+}
+
+const _voiceInputLangKey = 'pref_voice_input_language';
+
+class VoiceInputLanguageNotifier extends Notifier<VoiceInputLanguage> {
+  late final FlutterSecureStorage _storage;
+
+  @override
+  VoiceInputLanguage build() {
+    _storage = ref.read(themeStorageProvider);
+    _loadFromStorage();
+    return VoiceInputLanguage.japanese;
+  }
+
+  Future<void> _loadFromStorage() async {
+    try {
+      final value = await _storage.read(key: _voiceInputLangKey);
+      if (value != null) {
+        final lang = VoiceInputLanguage.values
+            .where((e) => e.localeId == value)
+            .firstOrNull;
+        if (lang != null && lang != state) {
+          state = lang;
+        }
+      }
+    } catch (_) {}
+  }
+
+  void setLanguage(VoiceInputLanguage lang) {
+    state = lang;
+    _save(lang);
+  }
+
+  Future<void> _save(VoiceInputLanguage lang) async {
+    try {
+      await _storage.write(key: _voiceInputLangKey, value: lang.localeId);
+    } catch (_) {}
+  }
+}
+
+final voiceInputLanguageProvider =
+    NotifierProvider<VoiceInputLanguageNotifier, VoiceInputLanguage>(
+  VoiceInputLanguageNotifier.new,
+);

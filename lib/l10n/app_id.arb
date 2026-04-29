@@ -215,5 +215,10 @@
   "languageSystem": "Ikuti sistem",
   "languageEnglish": "English",
   "languageJapanese": "日本語",
-  "languageIndonesian": "Bahasa Indonesia"
+  "languageIndonesian": "Bahasa Indonesia",
+
+  "voiceInput": "Input Suara",
+  "voiceInputAutoDetect": "Deteksi otomatis",
+  "voiceInputJapanese": "Bahasa Jepang",
+  "voiceInputEnglish": "Bahasa Inggris"
 }
