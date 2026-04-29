@@ -256,5 +256,6 @@
   "voiceInput": "Voice Input",
   "voiceInputAutoDetect": "Auto-detect",
   "voiceInputJapanese": "日本語",
-  "voiceInputEnglish": "English"
+  "voiceInputEnglish": "English",
+  "voiceInputIndonesian": "Bahasa Indonesia"
 }

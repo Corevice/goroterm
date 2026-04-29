@@ -140,6 +140,9 @@ class SettingsScreen extends ConsumerWidget {
                 DropdownMenuItem(
                     value: VoiceInputLanguage.english,
                     child: Text(l.voiceInputEnglish)),
+                DropdownMenuItem(
+                    value: VoiceInputLanguage.indonesian,
+                    child: Text(l.voiceInputIndonesian)),
               ],
               onChanged: (lang) {
                 if (lang != null) {

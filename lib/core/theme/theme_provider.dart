@@ -162,7 +162,8 @@ final localeProvider = NotifierProvider<LocaleNotifier, Locale?>(
 enum VoiceInputLanguage {
   autoDetect(''),
   japanese('ja_JP'),
-  english('en_US');
+  english('en_US'),
+  indonesian('id_ID');
 
   const VoiceInputLanguage(this.localeId);
   final String localeId;
