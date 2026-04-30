@@ -23,6 +23,9 @@ class TerminalScrollInterceptor extends StatefulWidget {
     required this.terminal,
     required this.child,
     this.disabled = false,
+    this.onLongPressStart,
+    this.onLongPressMoveUpdate,
+    this.onLongPressEnd,
   });
 
   final Terminal terminal;
@@ -30,6 +33,15 @@ class TerminalScrollInterceptor extends StatefulWidget {
 
   /// true の場合、スクロールインターセプトを無効化する。
   final bool disabled;
+
+  /// alt buffer 中に長押しが検知されたとき。長押し位置のグローバル座標を渡す。
+  final void Function(Offset globalPosition)? onLongPressStart;
+
+  /// 長押し中の指の移動。開始位置と現在位置のグローバル座標を渡す。
+  final void Function(Offset start, Offset current)? onLongPressMoveUpdate;
+
+  /// 指が離れた / キャンセルされたとき。選択を確定するため。
+  final VoidCallback? onLongPressEnd;
 
   @override
   State<TerminalScrollInterceptor> createState() =>
@@ -42,6 +54,8 @@ class _TerminalScrollInterceptorState
   int? _activePointerId;
   double _accumulatedDelta = 0.0;
   Offset _lastPointerPosition = Offset.zero;
+  Offset _currentPointerPosition = Offset.zero;
+  Offset _dragStartGlobalPosition = Offset.zero;
 
   // スクロール判定: 水平スワイプ（タブ切替）との競合を防ぐ
   bool _isVerticalDrag = false;
@@ -55,9 +69,15 @@ class _TerminalScrollInterceptorState
   // ポインタダウンから一定時間（_kLongPressDelay）以内に十分な移動がなければ
   // 長押しと判断してスクロールを無効化する。
   // Timer を使用することで tester.pump() によるテストが可能になる。
-  static const _kLongPressDelay = Duration(milliseconds: 300);
+  // alt buffer 中は TUI 長押しメニューとの衝突軽減のため長めに設定。
+  static const _kLongPressDelay = Duration(milliseconds: 450);
+
+  /// 長押し時点で指がほぼ静止していたとみなす移動量しきい値（pixels）。
+  static const _kLongPressMoveThreshold = 12.0;
+
   Timer? _longPressTimer;
   bool _longPressActivated = false;
+  bool _selectionStarted = false;
 
   // 1行あたりのピクセル数（フォントサイズに依存）
   double get _lineHeight {
@@ -71,6 +91,11 @@ class _TerminalScrollInterceptorState
   @override
   void dispose() {
     _longPressTimer?.cancel();
+    if (_selectionStarted) {
+      // フェイルセーフ: 解除コールバックを必ず呼ぶ
+      widget.onLongPressEnd?.call();
+      _selectionStarted = false;
+    }
     super.dispose();
   }
 
@@ -189,20 +214,41 @@ class _TerminalScrollInterceptorState
     _activePointerId = event.pointer;
     _accumulatedDelta = 0.0;
     _lastPointerPosition = event.localPosition;
+    _currentPointerPosition = event.localPosition;
     _dragStartPosition = event.localPosition;
+    _dragStartGlobalPosition = event.position;
     _isVerticalDrag = false;
     _directionDecided = false;
     _longPressActivated = false;
+    _selectionStarted = false;
     _longPressTimer?.cancel();
     _longPressTimer = Timer(_kLongPressDelay, () {
       _longPressActivated = true;
+      // 長押し時点でほぼ静止していれば（しきい値以下の移動量）、
+      // テキスト選択を開始する。
+      if (!_directionDecided) {
+        final dx = (_currentPointerPosition.dx - _dragStartPosition.dx).abs();
+        final dy = (_currentPointerPosition.dy - _dragStartPosition.dy).abs();
+        if (dx + dy <= _kLongPressMoveThreshold) {
+          _selectionStarted = true;
+          widget.onLongPressStart?.call(_dragStartGlobalPosition);
+        }
+      }
     });
   }
 
   void _onPointerMove(PointerMoveEvent event) {
     if (event.pointer != _activePointerId) return;
+    _currentPointerPosition = event.localPosition;
     if (!widget.terminal.isUsingAltBuffer) {
       _reset();
+      return;
+    }
+
+    // 既に選択モードに入っている場合: 選択範囲をドラッグ拡張
+    if (_selectionStarted) {
+      widget.onLongPressMoveUpdate
+          ?.call(_dragStartGlobalPosition, event.position);
       return;
     }
 
@@ -211,9 +257,8 @@ class _TerminalScrollInterceptorState
       final dx = (event.localPosition.dx - _dragStartPosition.dx).abs();
       final dy = (event.localPosition.dy - _dragStartPosition.dy).abs();
 
-      // 十分な移動がないまま長押し時間が経過 → テキスト選択モードと判断して無効化
-      if (_longPressActivated && dx + dy < 20) {
-        _reset();
+      // 十分な移動がないまま長押し時間が経過 → テキスト選択モードと判断
+      if (_longPressActivated && dx + dy <= _kLongPressMoveThreshold) {
         return;
       }
 
@@ -253,12 +298,18 @@ class _TerminalScrollInterceptorState
 
   void _onPointerUp(PointerUpEvent event) {
     if (event.pointer == _activePointerId) {
+      if (_selectionStarted) {
+        widget.onLongPressEnd?.call();
+      }
       _reset();
     }
   }
 
   void _onPointerCancel(PointerCancelEvent event) {
     if (event.pointer == _activePointerId) {
+      if (_selectionStarted) {
+        widget.onLongPressEnd?.call();
+      }
       _reset();
     }
   }
@@ -305,5 +356,7 @@ class _TerminalScrollInterceptorState
     _longPressTimer?.cancel();
     _longPressTimer = null;
     _longPressActivated = false;
+    _selectionStarted = false;
+    _currentPointerPosition = Offset.zero;
   }
 }

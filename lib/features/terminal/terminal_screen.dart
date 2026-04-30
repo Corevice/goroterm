@@ -696,6 +696,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   final _terminalController = TerminalController();
   final _focusNode = FocusNode();
+  final _terminalViewKey = GlobalKey<TerminalViewState>();
   final _scrollController = ScrollController();
   /// キーボード表示状態。アクションバー左端のキーボードボタンでのみ
   /// 開閉する（自動 requestFocus を廃止：タブ切替時の描画崩れと
@@ -944,6 +945,37 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         _terminalController.setSuspendPointerInput(true);
       }
     });
+  }
+
+  /// alt buffer (tmux 等) 中の長押し開始 — 単語選択を発動する。
+  void _onAltBufferLongPressStart(Offset globalPosition) {
+    final viewState = _terminalViewKey.currentState;
+    if (viewState == null) return;
+    if (!_altSelectActive && !_isSelectMode) {
+      _altSelectActive = true;
+      _terminalController.setSuspendPointerInput(true);
+    }
+    final localPos = viewState.renderTerminal.globalToLocal(globalPosition);
+    viewState.renderTerminal.selectWord(localPos);
+  }
+
+  /// 長押し中の指の移動 — 選択範囲をドラッグ拡張する。
+  void _onAltBufferLongPressMoveUpdate(Offset startGlobal, Offset currentGlobal) {
+    final viewState = _terminalViewKey.currentState;
+    if (viewState == null) return;
+    final start = viewState.renderTerminal.globalToLocal(startGlobal);
+    final current = viewState.renderTerminal.globalToLocal(currentGlobal);
+    viewState.renderTerminal.selectWord(start, current);
+  }
+
+  /// 長押し終了 — 選択がなければ suspend を解除（フェイルセーフ）。
+  void _onAltBufferLongPressEnd() {
+    if (!_altSelectActive) return;
+    if (_terminalController.selection != null) return; // 選択維持
+    _altSelectActive = false;
+    if (!_isSelectMode) {
+      _terminalController.setSuspendPointerInput(false);
+    }
   }
 
   void _onPointerUpForSelection(PointerUpEvent event) {
@@ -1434,6 +1466,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
   ) {
     return TerminalView(
       connectionState.terminal!,
+      key: _terminalViewKey,
       controller: _terminalController,
       focusNode: _focusNode,
       autofocus: false,
@@ -1500,6 +1533,9 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
                   child: TerminalScrollInterceptor(
                     terminal: connectionState.terminal!,
                     disabled: _isSelectMode,
+                    onLongPressStart: _onAltBufferLongPressStart,
+                    onLongPressMoveUpdate: _onAltBufferLongPressMoveUpdate,
+                    onLongPressEnd: _onAltBufferLongPressEnd,
                     child: Listener(
                       onPointerDown: _onPointerDownForSelection,
                       onPointerUp: _onPointerUpForSelection,

@@ -883,9 +883,13 @@ void main() {
     // so tester.pump(Duration) reliably advances the fake clock.
     // -------------------------------------------------------------------------
     testWidgets(
-        'long-press (300 ms, tiny movement) cancels scroll interception',
+        'long-press (tiny movement) invokes onLongPressStart and skips scroll',
         (tester) async {
       final outputs = <String>[];
+      Offset? longPressStartGlobal;
+      Offset? lastMoveStart;
+      Offset? lastMoveCurrent;
+      var longPressEndCalled = false;
       final testTerminal = Terminal(
         maxLines: 100,
         onOutput: outputs.add,
@@ -901,6 +905,12 @@ void main() {
             height: 400,
             child: TerminalScrollInterceptor(
               terminal: testTerminal,
+              onLongPressStart: (pos) => longPressStartGlobal = pos,
+              onLongPressMoveUpdate: (start, current) {
+                lastMoveStart = start;
+                lastMoveCurrent = current;
+              },
+              onLongPressEnd: () => longPressEndCalled = true,
               child: const ColoredBox(color: Colors.black),
             ),
           ),
@@ -909,29 +919,33 @@ void main() {
 
       final center = tester.getCenter(find.byType(TerminalScrollInterceptor));
 
-      // Finger down — starts the 300 ms long-press timer.
+      // Finger down — starts the long-press timer.
       final gesture = await tester.startGesture(center,
           kind: PointerDeviceKind.touch);
 
-      // Advance 310 ms: fires the long-press timer (_longPressActivated = true).
-      await tester.pump(const Duration(milliseconds: 310));
+      // Advance past the long-press threshold (450 ms) without moving.
+      await tester.pump(const Duration(milliseconds: 500));
 
-      // Move only 5 px (< 20 px threshold) — triggers long-press reset path.
-      await gesture.moveBy(const Offset(0, 5));
-      await tester.pump();
+      expect(longPressStartGlobal, isNotNull,
+          reason: 'long-press timer must invoke onLongPressStart');
 
-      // Continue dragging a large distance — must produce no scroll events
-      // because _reset() cleared _activePointerId and subsequent moves are ignored.
+      // Drag — must invoke onLongPressMoveUpdate (selection extension),
+      // not produce scroll events.
       await gesture.moveBy(const Offset(0, 200));
       await tester.pump();
+      expect(lastMoveStart, isNotNull);
+      expect(lastMoveCurrent, isNotNull);
+
+      // Finger up — must invoke onLongPressEnd.
       await gesture.up();
       await tester.pump();
+      expect(longPressEndCalled, isTrue);
 
       expect(
         outputs.isEmpty,
         isTrue,
-        reason: 'long-press must cancel scroll interception; '
-            'no scroll events must be generated after the 300 ms threshold',
+        reason: 'long-press must take precedence over scroll; '
+            'no scroll escape sequences must be generated',
       );
     });
 
