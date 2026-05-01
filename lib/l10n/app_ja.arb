@@ -154,6 +154,10 @@
   "columnCommand": "コマンド",
   "columnCpu": "CPU%",
   "columnMem": "MEM%",
+  "killProcessConfirm": "プロセス \"{command}\" (PID {pid}) を強制終了しますか？",
+  "killProcess": "プロセスを終了",
+  "processKilled": "プロセスが終了しました",
+  "failedToKillProcess": "プロセス終了失敗: {error}",
 
   "planLabel": "プラン: {plan}",
   "limit5Hour": "5 時間制限",

@@ -43,11 +43,13 @@ class DiskInfo {
 /// CPU / memory usage for a single process.
 class ProcessInfo {
   ProcessInfo({
+    required this.pid,
     required this.command,
     required this.cpuPercent,
     required this.memPercent,
   });
 
+  final int pid;
   final String command;
   final String cpuPercent;
   final String memPercent;
@@ -265,11 +267,15 @@ class ServerInfoParser {
       if (line.isEmpty) continue;
       final parts = line.split(_whitespace);
       if (parts.length >= 11) {
-        processes.add(ProcessInfo(
-          command: parts.sublist(10).join(' '),
-          cpuPercent: parts[2],
-          memPercent: parts[3],
-        ));
+        final pid = int.tryParse(parts[1]) ?? 0;
+        if (pid > 0) {
+          processes.add(ProcessInfo(
+            pid: pid,
+            command: parts.sublist(10).join(' '),
+            cpuPercent: parts[2],
+            memPercent: parts[3],
+          ));
+        }
       }
     }
     return processes;

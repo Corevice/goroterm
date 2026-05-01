@@ -185,6 +185,12 @@
   "columnCommand": "COMMAND",
   "columnCpu": "CPU%",
   "columnMem": "MEM%",
+  "killProcessConfirm": "Kill process \"{command}\" (PID {pid})?",
+  "@killProcessConfirm": { "placeholders": { "command": { "type": "String" }, "pid": { "type": "int" } } },
+  "killProcess": "Kill Process",
+  "processKilled": "Process killed",
+  "failedToKillProcess": "Failed to kill process: {error}",
+  "@failedToKillProcess": { "placeholders": { "error": { "type": "String" } } },
 
   "planLabel": "Plan: {plan}",
   "@planLabel": { "placeholders": { "plan": { "type": "String" } } },

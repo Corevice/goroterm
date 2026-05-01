@@ -154,6 +154,10 @@
   "columnCommand": "PERINTAH",
   "columnCpu": "CPU%",
   "columnMem": "MEM%",
+  "killProcessConfirm": "Akhiri proses \"{command}\" (PID {pid})?",
+  "killProcess": "Akhiri Proses",
+  "processKilled": "Proses diakhiri",
+  "failedToKillProcess": "Gagal mengakhiri proses: {error}",
 
   "planLabel": "Paket: {plan}",
   "limit5Hour": "Batas 5 Jam",

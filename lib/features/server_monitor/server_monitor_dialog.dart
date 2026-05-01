@@ -10,6 +10,23 @@ import '../../core/utils/format_utils.dart';
 import '../terminal/terminal_connection_provider.dart';
 import 'server_info_parser.dart';
 
+/// Process IDs and command names that are critical and should not be killed.
+const _kCriticalPids = {0, 1};
+const _kCriticalCommands = {
+  'init', 'systemd', 'kthreadd', 'rcu_gp', 'rcu_par_gp', 'slub_flushwq',
+  'netns', 'kworker', 'kswapd', 'kcompactd', 'crypto', 'kblockd', 'ata_sff',
+  'md', 'edac-poller', 'watchdogd', 'khungtaskd', 'oom_reaper', 'writeback',
+  'kcompactd0', 'kintegrityd', 'blkcg_punt_bio',
+  'tpm_dev_wq', 'kworker/u', 'migration', 'cpuhp', 'calibration',
+};
+
+bool _isCriticalProcess(ProcessInfo p) {
+  if (_kCriticalPids.contains(p.pid)) return true;
+  final cmd = p.command.split('/').last.split(' ').first;
+  if (_kCriticalCommands.contains(cmd)) return true;
+  return false;
+}
+
 /// サーバーリソースモニター。SSH 経由でシステム情報を取得しボトムシートで表示する。
 class ServerMonitorDialog extends ConsumerStatefulWidget {
   const ServerMonitorDialog({
@@ -185,6 +202,76 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
     );
   }
 
+  Future<void> _showKillConfirm(ProcessInfo process) async {
+    final l = AppLocalizations.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(l.killProcess, style: const TextStyle(color: Colors.white)),
+        content: Text(
+          l.killProcessConfirm(
+            process.command.length > 40
+                ? '${process.command.substring(0, 40)}…'
+                : process.command,
+            process.pid,
+          ),
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l.cancel, style: const TextStyle(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ButtonStyle(
+              foregroundColor: WidgetStateProperty.all(Colors.redAccent),
+            ),
+            child: Text(l.kill, style: const TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _killProcess(process);
+  }
+
+  Future<void> _killProcess(ProcessInfo process) async {
+    final l = AppLocalizations.of(context);
+    try {
+      final channelManager = ref
+          .read(terminalConnectionProvider(widget.sessionId))
+          .channelManager;
+      if (channelManager == null) return;
+      await channelManager.runCommand('kill ${process.pid}').timeout(
+        const Duration(seconds: 10),
+        onTimeout: () =>
+            throw Exception('Kill command timed out'),
+      );
+      if (!mounted) return;
+      _fetchInfo();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l.processKilled,
+              style: const TextStyle(color: Colors.white)),
+          backgroundColor: Colors.green[700],
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l.failedToKillProcess(e.toString()),
+              style: const TextStyle(color: Colors.white)),
+          backgroundColor: Colors.red[700],
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   Widget _buildError() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -347,6 +434,13 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
                 // Header row
                 Row(
                   children: [
+                    SizedBox(
+                      width: 36,
+                      child: Text('PID',
+                          style: const TextStyle(
+                              color: Colors.white38, fontSize: 11)),
+                    ),
+                    const SizedBox(width: 8),
                     Expanded(
                       flex: 4,
                       child: Text(l.columnCommand,
@@ -367,44 +461,79 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
                               color: Colors.white38, fontSize: 11),
                           textAlign: TextAlign.right),
                     ),
+                    const SizedBox(width: 8),
                   ],
                 ),
                 const Divider(color: Colors.white12, height: 8),
-                ...info.processes.map((p) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            flex: 4,
-                            child: Text(
-                              p.command,
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 12),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                ...info.processes.map((p) {
+                  final isCritical = _isCriticalProcess(p);
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 36,
+                          child: Text(
+                            '${p.pid}',
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 11),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          SizedBox(
-                            width: 56,
-                            child: Text(
-                              p.cpuPercent,
-                              style: const TextStyle(
-                                  color: Colors.tealAccent, fontSize: 12),
-                              textAlign: TextAlign.right,
-                            ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 4,
+                          child: Text(
+                            p.command,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 12),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          SizedBox(
-                            width: 56,
-                            child: Text(
-                              p.memPercent,
-                              style: const TextStyle(
-                                  color: Colors.lightBlueAccent,
-                                  fontSize: 12),
-                              textAlign: TextAlign.right,
-                            ),
+                        ),
+                        SizedBox(
+                          width: 56,
+                          child: Text(
+                            p.cpuPercent,
+                            style: const TextStyle(
+                                color: Colors.tealAccent, fontSize: 12),
+                            textAlign: TextAlign.right,
                           ),
-                        ],
-                      ),
-                    )),
+                        ),
+                        SizedBox(
+                          width: 56,
+                          child: Text(
+                            p.memPercent,
+                            style: const TextStyle(
+                                color: Colors.lightBlueAccent,
+                                fontSize: 12),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          icon: Icon(
+                            isCritical
+                                ? Icons.lock
+                                : Icons.delete_outline,
+                            size: 16,
+                            color: isCritical
+                                ? Colors.white24
+                                : Colors.orangeAccent,
+                          ),
+                          onPressed: isCritical
+                              ? null
+                              : () => _showKillConfirm(p),
+                          tooltip: isCritical
+                              ? ''
+                              : l.killProcess,
+                          padding: EdgeInsets.zero,
+                          constraints:
+                              const BoxConstraints.tightFor(width: 28, height: 28),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
               ],
             ),
           ),
