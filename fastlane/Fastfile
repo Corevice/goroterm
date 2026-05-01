@@ -86,6 +86,7 @@ platform :ios do
       submit_for_review: true,
       automatic_release: auto_release,
       force: true,
+      create_version: true,
       precheck_include_in_app_purchases: false,
       submission_information: {
         # SSH の標準暗号 (AES/RSA/ECDSA) のみ → exempt 扱い
