@@ -78,6 +78,15 @@ platform :ios do
     auto_release = ENV["IOS_AUTOMATIC_RELEASE"] == "true"
     UI.message("Automatic release after approval: #{auto_release}")
 
+    # App Store Connect にバージョンが存在しない場合、自動で作成。
+    # (deliver の "Cannot find edit app store version" エラーを回避)
+    create_app_version(
+      api_key: asc_api_key,
+      force: true,
+    )
+
+    sleep 10  # ASC version propagation wait
+
     deliver(
       api_key: asc_api_key,
       metadata_path: "./fastlane/metadata/ios",
@@ -86,7 +95,6 @@ platform :ios do
       submit_for_review: true,
       automatic_release: auto_release,
       force: true,
-      create_version: true,
       precheck_include_in_app_purchases: false,
       submission_information: {
         # SSH の標準暗号 (AES/RSA/ECDSA) のみ → exempt 扱い
