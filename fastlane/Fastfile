@@ -81,7 +81,7 @@ platform :ios do
     # Read app version from IPA's Info.plist — fastlane chdir's to fastlane/
     # so the path is relative to that directory.
     require "plist"
-    ipa_path = "../build/ios/ipa/GoroTerm.ipa"
+    ipa_path = "build/ios/ipa/GoroTerm.ipa"
     ipa_plist = nil
     Zip::File.open(ipa_path) do |zip|
       entry = zip.find { |e| e.name.end_with?("/Payload/GoroTerm.app/Info.plist") }
@@ -97,7 +97,6 @@ platform :ios do
 
     deliver(
       api_key: asc_api_key,
-      ipa: ipa_path,
       app_version: app_version,
       metadata_path: "./fastlane/metadata/ios",
       skip_binary_upload: true,
