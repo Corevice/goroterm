@@ -78,17 +78,26 @@ platform :ios do
     auto_release = ENV["IOS_AUTOMATIC_RELEASE"] == "true"
     UI.message("Automatic release after approval: #{auto_release}")
 
-    # App Store Connect にバージョンが存在しない場合、自動で作成。
-    # (deliver の "Cannot find edit app store version" エラーを回避)
-    create_app_version(
-      api_key: asc_api_key,
-      force: true,
-    )
+    # Get the app version from the IPA's Info.plist so deliver knows which
+    # version to edit (and auto-creates it in ASC if it doesn't exist yet).
+    require "plist"
+    ipa_path = "build/ios/ipa/GoroTerm.ipa"
+    ipa_info = Zip::File.open(ipa_path) do |zip|
+      entry = zip.find { |e| e.name.end_with?("/Payload/GoroTerm.app/Info.plist") }
+      PlistParser.new(zip.read(entry)).parse if entry
+    end
+    app_version = ipa_info&.dig("CFBundleShortVersionString")
+    build_version = ipa_info&.dig("CFBundleVersion")
 
-    sleep 10  # ASC version propagation wait
+    if app_version
+      UI.message("Submitting version #{app_version} (build #{build_version}) for review")
+      # Sleep to let ASC index the version after TestFlight upload.
+      sleep 30
+    end
 
     deliver(
       api_key: asc_api_key,
+      app_version: app_version,
       metadata_path: "./fastlane/metadata/ios",
       skip_binary_upload: true,
       skip_screenshots: true,
