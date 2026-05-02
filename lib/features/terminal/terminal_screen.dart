@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dartssh2/dartssh2.dart';
@@ -1290,11 +1291,17 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       if (isVideo) {
         // 動画 → GIF 変換（サーバー側 ffmpeg）
         final gifPath = '$_uploadDir/${ts}_${fileName.split('.').first}.gif';
+        // ffmpeg を実行 → 終了コードを echo → GIF サイズを stat で取得
+        // exit code 0 でもファイルが空 / 不在の可能性があるので両方チェック。
         final ffmpegCmd =
-            "ffmpeg -i ${shellQuote(remotePath)}"
+            "ffmpeg -loglevel error -i ${shellQuote(remotePath)}"
             " -vf 'fps=10,scale=480:-1:flags=lanczos'"
             " -t 15 -y"
-            " ${shellQuote(gifPath)}";
+            " ${shellQuote(gifPath)} 2>&1; "
+            "echo \"FFMPEG_EXIT=\$?\"; "
+            "stat -c %s ${shellQuote(gifPath)} 2>/dev/null "
+            "|| stat -f %z ${shellQuote(gifPath)} 2>/dev/null "
+            "|| echo 0";
 
         if (mounted) {
           ScaffoldMessenger.of(context)
@@ -1308,12 +1315,36 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         }
 
         try {
-          await channelManager.runCommand(ffmpegCmd);
-          // 変換成功 → GIF パスを使用、元動画を削除
-          pastePath = gifPath;
-          try {
-            await channelManager.runCommand("rm -f ${shellQuote(remotePath)}");
-          } catch (_) {}
+          final out = await channelManager.runCommand(ffmpegCmd);
+          final outStr = utf8.decode(out, allowMalformed: true);
+          final exitMatch = RegExp(r'FFMPEG_EXIT=(\d+)').firstMatch(outStr);
+          final exitCode = int.tryParse(exitMatch?.group(1) ?? '') ?? -1;
+          final lines = outStr.split('\n').where((l) => l.isNotEmpty).toList();
+          final gifSize =
+              int.tryParse(lines.isNotEmpty ? lines.last.trim() : '0') ?? 0;
+          if (exitCode == 0 && gifSize > 1024) {
+            // 変換成功 → GIF パスを使用、元動画を削除
+            pastePath = gifPath;
+            try {
+              await channelManager.runCommand("rm -f ${shellQuote(remotePath)}");
+            } catch (_) {}
+          } else {
+            // 変換は走ったが GIF が空 / 小さすぎ → 元動画パスをそのまま使用
+            try {
+              await channelManager.runCommand("rm -f ${shellQuote(gifPath)}");
+            } catch (_) {}
+            if (mounted) {
+              ScaffoldMessenger.of(context)
+                ..hideCurrentSnackBar()
+                ..showSnackBar(
+                  SnackBar(
+                    content: Text(AppLocalizations.of(context)
+                        .gifConversionFailed(remotePath)),
+                    duration: const Duration(seconds: 5),
+                  ),
+                );
+            }
+          }
         } catch (e) {
           // ffmpeg 失敗（未インストール等）→ 元動画パスをそのまま使用
           if (mounted) {
