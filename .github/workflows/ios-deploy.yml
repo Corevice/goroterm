@@ -114,16 +114,10 @@ jobs:
           IOS_WAIT_FOR_PROCESSING: ${{ startsWith(github.ref, 'refs/tags/v') && 'true' || 'false' }}
         run: bundle exec fastlane ios deploy
 
-      # タグ push 時のみ App Store 本番審査に提出。承認後は自動公開。
-      - name: Submit to App Store Review
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          IOS_AUTOMATIC_RELEASE: 'true'
-        run: bundle exec fastlane ios submit_review
+      # NOTE: App Store 本番審査の自動提出は Apple API
+      # (patch_app_store_version_with_build) が不安定に拒否するため停止中。
+      # TestFlight ビルドは上記 step で投入済み。本番審査へは
+      # App Store Connect Web UI から手動で提出する。
 
       - name: Clean up keychain
         if: always()
