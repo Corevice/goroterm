@@ -78,14 +78,45 @@ platform :ios do
     auto_release = ENV["IOS_AUTOMATIC_RELEASE"] == "true"
     UI.message("Automatic release after approval: #{auto_release}")
 
-    # Read app version from pubspec.yaml — same source as flutter build.
+    # Read app version + build number from pubspec.yaml.
     pubspec_path = File.expand_path("../pubspec.yaml", __dir__)
     pubspec_content = File.read(pubspec_path)
     app_version = pubspec_content[/^version:\s*([0-9.]+)/, 1]
     UI.message("App version from pubspec.yaml: #{app_version}")
 
-    # Wait briefly for ASC to index the version after TestFlight upload.
-    sleep 30
+    # Poll App Store Connect until the just-uploaded TestFlight build reaches
+    # VALID state. Without this, deliver fails with
+    #   "The specified pre-release build could not be added"
+    # because ASC marks the build VALID for TestFlight before it is fully
+    # ready for App Store submission.
+    require "spaceship"
+    Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.create(
+      key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      key: ENV["APP_STORE_CONNECT_API_KEY_P8"],
+    )
+    app = Spaceship::ConnectAPI::App.find("com.corevice.goroterm")
+    UI.user_error!("App not found on ASC") unless app
+
+    valid = false
+    20.times do |i|
+      build = Spaceship::ConnectAPI::Build.all(
+        filter: { "app" => app.id, "preReleaseVersion.version" => app_version },
+        sort: "-uploadedDate",
+        limit: 1,
+      ).first
+      if build
+        UI.message("Build #{build.version} state=#{build.processing_state} (try #{i + 1}/20)")
+        if build.processing_state == "VALID"
+          valid = true
+          break
+        end
+      else
+        UI.message("Build for version #{app_version} not yet visible on ASC (try #{i + 1}/20)")
+      end
+      sleep 30
+    end
+    UI.important("Build did not reach VALID state within 10 min, attempting submit anyway") unless valid
 
     deliver(
       api_key: asc_api_key,
