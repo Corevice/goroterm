@@ -1290,15 +1290,23 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
 
       if (isVideo) {
         // 動画 → GIF 変換（サーバー側 ffmpeg）
+        // palettegen/paletteuse: 標準的な高品質 GIF 生成方式
+        //   iOS の HEVC や色空間 BT.2020 でも安定動作。
+        // -an: 音声を明示的にドロップ（音声コーデック起因失敗を排除）
+        // scale=480:-2: 偶数次元（奇数だと一部エンコーダで失敗）
+        // -fflags +genpts: iOS の不正タイムスタンプを補正
+        // exit code + GIF magic bytes (GIF87a/GIF89a) + サイズの三重検証。
         final gifPath = '$_uploadDir/${ts}_${fileName.split('.').first}.gif';
-        // ffmpeg を実行 → 終了コードを echo → GIF サイズを stat で取得
-        // exit code 0 でもファイルが空 / 不在の可能性があるので両方チェック。
         final ffmpegCmd =
-            "ffmpeg -loglevel error -i ${shellQuote(remotePath)}"
-            " -vf 'fps=10,scale=480:-1:flags=lanczos'"
-            " -t 15 -y"
+            "ffmpeg -loglevel error -fflags +genpts -i ${shellQuote(remotePath)}"
+            " -vf 'fps=10,scale=480:-2:flags=lanczos,split[a][b];"
+            "[a]palettegen=stats_mode=diff[p];"
+            "[b][p]paletteuse=dither=bayer:bayer_scale=5'"
+            " -t 15 -an -y"
             " ${shellQuote(gifPath)} 2>&1; "
             "echo \"FFMPEG_EXIT=\$?\"; "
+            "sig=\$(head -c 4 ${shellQuote(gifPath)} 2>/dev/null); "
+            "case \"\$sig\" in GIF8) echo VALID_GIF=1 ;; *) echo VALID_GIF=0 ;; esac; "
             "stat -c %s ${shellQuote(gifPath)} 2>/dev/null "
             "|| stat -f %z ${shellQuote(gifPath)} 2>/dev/null "
             "|| echo 0";
@@ -1319,10 +1327,12 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
           final outStr = utf8.decode(out, allowMalformed: true);
           final exitMatch = RegExp(r'FFMPEG_EXIT=(\d+)').firstMatch(outStr);
           final exitCode = int.tryParse(exitMatch?.group(1) ?? '') ?? -1;
+          final validMatch = RegExp(r'VALID_GIF=(\d)').firstMatch(outStr);
+          final isValidGif = (validMatch?.group(1) ?? '0') == '1';
           final lines = outStr.split('\n').where((l) => l.isNotEmpty).toList();
           final gifSize =
               int.tryParse(lines.isNotEmpty ? lines.last.trim() : '0') ?? 0;
-          if (exitCode == 0 && gifSize > 1024) {
+          if (exitCode == 0 && isValidGif && gifSize > 1024) {
             // 変換成功 → GIF パスを使用、元動画を削除
             pastePath = gifPath;
             try {
