@@ -100,6 +100,9 @@ platform :ios do
       submit_for_review: true,
       automatic_release: auto_release,
       force: true,
+      # 前バージョンが審査中だと "build could not be added" で失敗するため、
+      # 提出前に審査中バージョンがあれば自動で取り下げて新しいビルドを上げる。
+      reject_if_possible: true,
       version_check_wait_retry_limit: 15,
       precheck_include_in_app_purchases: false,
       submission_information: {
