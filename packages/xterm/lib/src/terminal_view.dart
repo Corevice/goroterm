@@ -422,8 +422,15 @@ class TerminalViewState extends State<TerminalView> {
       return KeyEventResult.ignored;
     }
 
+    // Shift+Tab: Flutter doesn't have LogicalKeyboardKey.backtab in older SDKs,
+    // so we convert Tab + shift → backtab ourselves.
+    final effectiveKey =
+        key == TerminalKey.tab && HardwareKeyboard.instance.isShiftPressed
+            ? TerminalKey.backtab
+            : key;
+
     final handled = widget.terminal.keyInput(
-      key,
+      effectiveKey,
       ctrl: HardwareKeyboard.instance.isControlPressed,
       alt: HardwareKeyboard.instance.isAltPressed,
       shift: HardwareKeyboard.instance.isShiftPressed,

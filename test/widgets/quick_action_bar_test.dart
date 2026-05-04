@@ -11,7 +11,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
           ),
         ),
@@ -25,7 +25,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onClaudeCommand: () => called = true,
           ),
@@ -42,7 +42,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
           ),
         ),
@@ -56,7 +56,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onImagePaste: () => called = true,
           ),
@@ -74,7 +74,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
           ),
         ),
@@ -88,7 +88,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onClipboardPaste: () => called = true,
           ),
@@ -106,7 +106,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
           ),
         ),
@@ -120,7 +120,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onToggleSelectMode: () => called = true,
           ),
@@ -138,7 +138,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onScrollToTop: () => called = true,
           ),
@@ -154,7 +154,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onScrollToBottom: () => called = true,
           ),
@@ -170,7 +170,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onPageUp: () => called = true,
           ),
@@ -187,7 +187,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onPageDown: () => called = true,
           ),
@@ -204,7 +204,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: inputs.add,
           ),
         ),
@@ -227,7 +227,7 @@ void main() {
       Widget buildWithSelectMode(bool isSelectMode) => MaterialApp(
             home: Scaffold(
               body: QuickActionBar(
-                onKeyPressed: (key, {ctrl = false}) {},
+                onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
                 onTextInput: (_) {},
                 onToggleSelectMode: () => selectMode = !selectMode,
                 isSelectMode: isSelectMode,
@@ -251,7 +251,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) => calls.add(key),
             onTextInput: (_) {},
           ),
         ),
@@ -269,7 +269,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) => calls.add(key),
             onTextInput: (_) {},
           ),
         ),
@@ -318,7 +318,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) => calls.add(key),
             onTextInput: (_) {},
           ),
         ),
@@ -354,7 +354,7 @@ void main() {
           body: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: QuickActionBar(
-              onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+              onKeyPressed: (key, {bool ctrl = false, bool shift = false}) => calls.add(key),
               onTextInput: (_) {},
             ),
           ),
@@ -388,7 +388,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) => calls.add(key),
             onTextInput: (_) {},
           ),
         ),
@@ -412,7 +412,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) => calls.add(key),
             onTextInput: (_) {},
           ),
         ),
@@ -462,7 +462,7 @@ void main() {
       Widget buildWrapper({required bool inContainer}) {
         final bar = QuickActionBar(
           key: barKey,
-          onKeyPressed: (key, {ctrl = false}) => calls.add(key),
+          onKeyPressed: (key, {bool ctrl = false, bool shift = false}) => calls.add(key),
           onTextInput: (_) {},
         );
         return MaterialApp(
@@ -512,7 +512,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
           ),
         ),
@@ -527,7 +527,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onVoiceInput: () => called = true,
           ),
@@ -544,7 +544,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onVoiceInput: () {},
             isListening: true,
@@ -559,7 +559,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) {},
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {},
             onTextInput: (_) {},
             onVoiceInput: () {},
             isListening: false,
@@ -578,7 +578,7 @@ void main() {
       return MaterialApp(
         home: Scaffold(
           body: QuickActionBar(
-            onKeyPressed: (key, {ctrl = false}) => calls.add((key, ctrl)),
+            onKeyPressed: (key, {bool ctrl = false, bool shift = false}) => calls.add((key, ctrl)),
             onTextInput: (_) {},
           ),
         ),
