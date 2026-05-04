@@ -24,7 +24,7 @@ class QuickActionBar extends StatelessWidget {
     this.keyboardOpen = false,
   });
 
-  final void Function(TerminalKey key, {bool ctrl}) onKeyPressed;
+  final void Function(TerminalKey key, {bool ctrl, bool shift}) onKeyPressed;
   final void Function(String text) onTextInput;
   final VoidCallback? onImagePaste;
   final VoidCallback? onClipboardPaste;
@@ -131,6 +131,10 @@ class QuickActionBar extends StatelessWidget {
               _ActionButton(
                 label: 'Tab',
                 onPressed: () => onKeyPressed(TerminalKey.tab),
+              ),
+              _ActionButton(
+                label: 'S-Tab',
+                onPressed: () => onKeyPressed(TerminalKey.backtab, shift: true),
               ),
               _ActionButton(
                 icon: Icons.keyboard_return,
@@ -477,3 +481,4 @@ class _ActionButton extends StatelessWidget {
     );
   }
 }
+

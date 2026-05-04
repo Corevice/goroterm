@@ -49,6 +49,7 @@ final _keyToTerminalKey = {
   LogicalKeyboardKey.escape: TerminalKey.escape,
   LogicalKeyboardKey.backspace: TerminalKey.backspace,
   LogicalKeyboardKey.tab: TerminalKey.tab,
+  LogicalKeyboardKey.backtab: TerminalKey.backtab,
   LogicalKeyboardKey.space: TerminalKey.space,
   LogicalKeyboardKey.minus: TerminalKey.minus,
   LogicalKeyboardKey.equal: TerminalKey.equal,

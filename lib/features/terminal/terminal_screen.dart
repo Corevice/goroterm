@@ -1590,8 +1590,8 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
                 ),
         ),
         QuickActionBar(
-          onKeyPressed: (key, {bool ctrl = false}) {
-            connectionState.terminal?.keyInput(key, ctrl: ctrl);
+          onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {
+            connectionState.terminal?.keyInput(key, ctrl: ctrl, shift: shift);
           },
           onTextInput: (text) {
             connectionState.terminal?.textInput(text);
