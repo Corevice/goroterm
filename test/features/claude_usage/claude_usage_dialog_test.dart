@@ -126,7 +126,7 @@ void main() {
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
@@ -143,11 +143,12 @@ void main() {
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // Header
       expect(find.text('Claude Code Usage'), findsOneWidget);
@@ -168,11 +169,12 @@ void main() {
 
     testWidgets('shows error when SSH not connected', (tester) async {
       await tester.pumpWidget(buildTestWidget(channelManager: null));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.text('SSH not connected'), findsOneWidget);
       expect(find.byIcon(Icons.error_outline), findsOneWidget);
@@ -183,11 +185,12 @@ void main() {
           .thenThrow(Exception('Connection timeout'));
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.textContaining('Connection timeout'), findsOneWidget);
     });
@@ -198,11 +201,12 @@ void main() {
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(
         find.textContaining('Claude Code not found'),
@@ -216,11 +220,12 @@ void main() {
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.textContaining('No output from remote server'), findsOneWidget);
     });
@@ -231,11 +236,12 @@ void main() {
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.textContaining('Invalid response'), findsOneWidget);
     });
@@ -248,7 +254,7 @@ void main() {
       });
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
@@ -272,7 +278,7 @@ void main() {
       });
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
@@ -293,11 +299,12 @@ void main() {
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.text('Extra Usage'), findsOneWidget);
       // $12.50 used (1250 cents)
@@ -325,11 +332,12 @@ void main() {
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // 5% remaining → warning text
       expect(find.textContaining('5.0% remaining'), findsOneWidget);
@@ -363,11 +371,12 @@ void main() {
 
           await tester
               .pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-          await tester.pumpAndSettle();
+          await tester.pump(const Duration(milliseconds: 10));
 
           final context = tester.element(find.byType(Scaffold));
           ClaudeUsageDialog.show(context, 'test-session');
-          await tester.pumpAndSettle();
+          await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
           expect(find.textContaining(label), findsOneWidget);
         });
@@ -383,11 +392,12 @@ void main() {
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ClaudeUsageDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // Should parse successfully despite leading non-JSON line
       expect(find.textContaining('Claude Max'), findsOneWidget);

@@ -101,7 +101,7 @@ void main() {
       ));
 
       // Open the bottom sheet
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
       await tester.pump(); // start animation
@@ -112,11 +112,11 @@ void main() {
 
       // Complete the future and close to avoid timer leak
       completer.complete(Uint8List.fromList(utf8.encode(_sampleOutput)));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       // Dismiss bottom sheet to cancel Timer.periodic in dispose
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
     });
 
     // -------------------------------------------------------------------------
@@ -134,7 +134,7 @@ void main() {
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
@@ -146,7 +146,7 @@ void main() {
 
       // Advance 30 seconds — the timeout fires and throws an exception.
       await tester.pump(const Duration(seconds: 30));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       // Spinner must be gone and an error message must be visible.
       expect(find.byType(CircularProgressIndicator), findsNothing);
@@ -154,9 +154,9 @@ void main() {
 
       // Dismiss and complete the completer to avoid dangling futures.
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
       completer.complete(Uint8List.fromList([]));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
     });
 
     testWidgets('displays server info after successful fetch', (tester) async {
@@ -167,11 +167,12 @@ void main() {
       await tester.pumpWidget(buildTestWidget(
         channelManager: mockChannelManager,
       ));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // System info
       expect(find.text('Server Monitor'), findsOneWidget);
@@ -201,11 +202,12 @@ void main() {
 
     testWidgets('shows error when SSH not connected', (tester) async {
       await tester.pumpWidget(buildTestWidget(channelManager: null));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.text('SSH not connected'), findsOneWidget);
     });
@@ -217,11 +219,12 @@ void main() {
       await tester.pumpWidget(buildTestWidget(
         channelManager: mockChannelManager,
       ));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.textContaining('Connection refused'), findsOneWidget);
     });
@@ -236,7 +239,7 @@ void main() {
       await tester.pumpWidget(buildTestWidget(
         channelManager: mockChannelManager,
       ));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
@@ -244,11 +247,13 @@ void main() {
 
       expect(callCount, 1);
 
-      // Tap refresh
       await tester.tap(find.byIcon(Icons.refresh));
       await tester.pumpAndSettle();
 
       expect(callCount, 2);
+
+      Navigator.of(tester.element(find.text('Server Monitor'))).pop();
+      await tester.pumpAndSettle();
     });
 
     // -------------------------------------------------------------------------
@@ -275,11 +280,12 @@ void main() {
       });
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // Initial fetch done: Refresh button is visible.
       expect(find.byIcon(Icons.refresh), findsOneWidget);
@@ -293,12 +299,12 @@ void main() {
 
       // Release the blocked fetch and verify Refresh reappears.
       fetchCompleter.complete(Uint8List.fromList(utf8.encode(_sampleOutput)));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       expect(find.byIcon(Icons.refresh), findsOneWidget);
 
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
     });
 
     testWidgets('auto-refreshes every 10 seconds', (tester) async {
@@ -311,23 +317,24 @@ void main() {
       await tester.pumpWidget(buildTestWidget(
         channelManager: mockChannelManager,
       ));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(callCount, 1);
 
       // Advance time by 10 seconds for auto-refresh
       await tester.pump(const Duration(seconds: 10));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       expect(callCount, 2);
 
       // Another 10 seconds
       await tester.pump(const Duration(seconds: 10));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       expect(callCount, 3);
     });
@@ -343,11 +350,12 @@ void main() {
       await tester.pumpWidget(buildTestWidget(
         channelManager: mockChannelManager,
       ));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.text('minimal'), findsOneWidget);
       expect(find.text('Linux'), findsOneWidget);
@@ -364,11 +372,12 @@ void main() {
       await tester.pumpWidget(buildTestWidget(
         channelManager: mockChannelManager,
       ));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // Verify the dialog rendered with the correct title
       expect(find.text('Server Monitor'), findsOneWidget);
@@ -386,7 +395,7 @@ void main() {
       await tester.pumpWidget(buildTestWidget(
         channelManager: mockChannelManager,
       ));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
@@ -395,13 +404,16 @@ void main() {
       // First fetch fails — error is shown
       expect(find.textContaining('network error'), findsOneWidget);
 
-      // Tap refresh — error should clear and new data shown
+      // Tap refresh
       await tester.tap(find.byIcon(Icons.refresh));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('network error'), findsNothing);
       expect(find.text('test-server'), findsOneWidget);
       expect(callCount, 2);
+
+      Navigator.of(tester.element(find.text('Server Monitor'))).pop();
+      await tester.pumpAndSettle();
     });
 
     testWidgets('parses df -k Linux fallback output correctly', (tester) async {
@@ -435,11 +447,12 @@ root         1  1.0  0.5 12345 6789 ?        Ss   Jan01   0:01 /sbin/init
       await tester.pumpWidget(buildTestWidget(
         channelManager: mockChannelManager,
       ));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // Mount points must be last col (not device paths)
       expect(find.text('/'), findsOneWidget);
@@ -481,11 +494,12 @@ root         1  2.0  1.0 409600 81920 ??   Ss   Fri01 0:12 /sbin/launchd
       await tester.pumpWidget(buildTestWidget(
         channelManager: mockChannelManager,
       ));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // Mount points must be last col, not device paths
       expect(find.text('/'), findsOneWidget);
@@ -511,11 +525,12 @@ root         1  2.0  1.0 409600 81920 ??   Ss   Fri01 0:12 /sbin/launchd
       await tester.pumpWidget(buildTestWidget(
         channelManager: mockChannelManager,
       ));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // Verify the memory percentage text shows high usage
       expect(find.textContaining('93.'), findsOneWidget);
@@ -557,10 +572,11 @@ root         1  0.0  0.0 12345  6789 ?        Ss   Jan01   0:00 /sbin/init
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // The real root partition must appear.
       expect(find.text('/'), findsOneWidget);
@@ -568,7 +584,7 @@ root         1  0.0  0.0 12345  6789 ?        Ss   Jan01   0:00 /sbin/init
       expect(find.text('/snap/core'), findsNothing);
 
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
     });
 
     testWidgets('disk entries with size 0 are excluded (df -k format)', (tester) async {
@@ -599,17 +615,18 @@ root         1  0.0  0.0 12345  6789 ?        Ss   Jan01   0:00 /sbin/init
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.text('/'), findsOneWidget);
       // /overlay has 0 blocks — must be silently dropped
       expect(find.text('/overlay'), findsNothing);
 
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
     });
 
     // -------------------------------------------------------------------------
@@ -646,10 +663,11 @@ root         2  2.0  0.5 99999 1111 ?        S    Jan01   0:02 /usr/bin/valid-pr
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // Valid processes appear
       expect(find.textContaining('/sbin/init'), findsOneWidget);
@@ -658,7 +676,7 @@ root         2  2.0  0.5 99999 1111 ?        S    Jan01   0:02 /usr/bin/valid-pr
       expect(find.text('short line with only few'), findsNothing);
 
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
     });
 
     // -------------------------------------------------------------------------
@@ -693,10 +711,11 @@ root         1  3.0  0.5 11111  2222 ?        Ss   Jan01   0:01 /sbin/init
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // Core data must still be visible
       expect(find.text('no-end-server'), findsOneWidget);
@@ -705,7 +724,7 @@ root         1  3.0  0.5 11111  2222 ?        Ss   Jan01   0:01 /sbin/init
       expect(find.textContaining('/sbin/init'), findsOneWidget);
 
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
     });
 
     // -------------------------------------------------------------------------
@@ -742,10 +761,11 @@ root         1  0.0  0.0 12345  6789 ?        Ss   Jan01   0:00 /sbin/init
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // System info and disk are still shown
       expect(find.text('header-only-mem'), findsOneWidget);
@@ -757,7 +777,7 @@ root         1  0.0  0.0 12345  6789 ?        Ss   Jan01   0:00 /sbin/init
       expect(find.textContaining('('), findsNothing);
 
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
     });
 
     testWidgets('memory card is hidden when MEMORY section is completely empty',
@@ -787,17 +807,18 @@ root         1  0.0  0.0 12345  6789 ?        Ss   Jan01   0:00 /sbin/init
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.text('empty-mem-section'), findsOneWidget);
       // Memory card title 'Memory' must not appear when memTotal == 0
       expect(find.text('Memory'), findsNothing);
 
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
     });
 
     // -------------------------------------------------------------------------
@@ -838,10 +859,11 @@ root         1  0.0  0.0 12345  6789 ?        Ss   Jan01   0:00 /sbin/init
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       // Host name renders — confirms the parse succeeded.
       expect(find.text('no-loadavg-host'), findsOneWidget);
@@ -849,7 +871,7 @@ root         1  0.0  0.0 12345  6789 ?        Ss   Jan01   0:00 /sbin/init
       expect(find.text('0'), findsNWidgets(3));
 
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
     });
 
     testWidgets(
@@ -879,17 +901,18 @@ root         1  0.0  0.0 12345  6789 ?        Ss   Jan01   0:00 /sbin/init
       );
 
       await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
       final context = tester.element(find.byType(Scaffold));
       ServerMonitorDialog.show(context, 'test-session');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
       expect(find.text('no-loadavg-section'), findsOneWidget);
       // All three load average chips must show '0'.
       expect(find.text('0'), findsNWidgets(3));
 
       Navigator.of(tester.element(find.text('Server Monitor'))).pop();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
     });
   });
 }

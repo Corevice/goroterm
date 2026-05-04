@@ -323,7 +323,7 @@ class _NetworkErrorSshClientService extends SshClientService {
 /// Terminal.resize(w, h) は max(w, 1) に丸めるため、通常の Terminal では
 /// 0×0 の状態を作れない。
 class _ZeroDimensionTerminal extends Terminal {
-  _ZeroDimensionTerminal() : super(maxLines: 1000);
+  _ZeroDimensionTerminal() : super(maxLines: 50);
 
   @override
   int get viewWidth => 0;
@@ -666,7 +666,7 @@ void main() {
 
   group('Terminal preservation via copyWith', () {
     test('copyWith preserves terminal reference when only status changes', () {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       final state = TerminalConnectionState(
         status: ConnectionStatus.connected,
         terminal: terminal,
@@ -687,7 +687,7 @@ void main() {
     });
 
     test('copyWith preserves terminal through reconnecting status', () {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       final connected = TerminalConnectionState(
         status: ConnectionStatus.connected,
         terminal: terminal,
@@ -705,7 +705,7 @@ void main() {
 
     test('clearChannelManager true clears only channelManager, not terminal',
         () {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       const state = TerminalConnectionState(
         status: ConnectionStatus.connected,
         channelManager: null, // channelManager already tested as null-safe above
@@ -1380,7 +1380,7 @@ void main() {
 
     test('preserves terminal reference when transitioning to disconnected', () {
       // The scroll-back buffer must survive a disconnect event.
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       notifier.initConnectedStateForTesting(
         sshService: fakeService,
         connectedState: TerminalConnectionState(
@@ -1465,7 +1465,7 @@ void main() {
       notifier = container.read(
         terminalConnectionProvider('flush-test').notifier,
       );
-      terminal = Terminal(maxLines: 1000);
+      terminal = Terminal(maxLines: 50);
     });
 
     tearDown(() => container.dispose());
@@ -2124,7 +2124,7 @@ void main() {
     tearDown(() => container.dispose());
 
     test('does nothing when tmuxSessionName is null', () async {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       final received = <String>[];
       terminal.onOutput = received.add;
 
@@ -2137,7 +2137,7 @@ void main() {
     });
 
     test('sends tmux attach command after shell is ready', () async {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       final received = <String>[];
       terminal.onOutput = received.add;
 
@@ -2156,7 +2156,7 @@ void main() {
     });
 
     test('shell-escapes session names containing single quotes', () async {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       final received = <String>[];
       terminal.onOutput = received.add;
 
@@ -2173,7 +2173,7 @@ void main() {
     });
 
     test('does nothing for second call when tmuxSessionName is null', () async {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       final received = <String>[];
       terminal.onOutput = received.add;
 
@@ -2205,7 +2205,7 @@ void main() {
 
     test('calls resizePty after tmux attach when terminal has non-zero size',
         () async {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       // Default viewWidth=80, viewHeight=24 (non-zero → resizePty should fire).
       final mockManager = _MockSshChannelManager();
 
@@ -2221,7 +2221,7 @@ void main() {
     });
 
     test('calls resizePty with correct custom terminal dimensions', () async {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       terminal.resize(120, 40); // custom size — resizePty must use these values
       final mockManager = _MockSshChannelManager();
 
@@ -2238,7 +2238,7 @@ void main() {
     test('skips resizePty when channelManager is null', () async {
       // _channelManager is null by default (not set via setChannelManagerForTesting).
       // The null-safe call `_channelManager?.resizePty(w, h)` must be a no-op.
-      final terminal = Terminal(maxLines: 1000); // 80×24 (non-zero)
+      final terminal = Terminal(maxLines: 50); // 80×24 (non-zero)
       final mockManager = _MockSshChannelManager();
 
       notifier.setTmuxSessionNameForTesting('resize-null-mgr');
@@ -2279,7 +2279,7 @@ void main() {
     // absorb the exception so it does not become an unhandled future error.
     // -------------------------------------------------------------------------
     test('does not propagate exceptions thrown by resizePty', () async {
-      final terminal = Terminal(maxLines: 1000); // 80×24 → resizePty will be called
+      final terminal = Terminal(maxLines: 50); // 80×24 → resizePty will be called
       final mockManager = _MockSshChannelManager();
 
       when(() => mockManager.resizePty(any(), any()))
@@ -3851,7 +3851,7 @@ void main() {
     tearDown(() => container.dispose());
 
     test('transitions to connected status', () {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       notifier.callSetConnectedStateForTesting(terminal);
 
       final state =
@@ -3861,7 +3861,7 @@ void main() {
     });
 
     test('sets terminal in state', () {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       notifier.callSetConnectedStateForTesting(terminal);
 
       final state =
@@ -3880,7 +3880,7 @@ void main() {
         ),
       );
 
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       notifier.callSetConnectedStateForTesting(terminal);
 
       final state =
@@ -3900,7 +3900,7 @@ void main() {
         ),
       );
 
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       notifier.callSetConnectedStateForTesting(terminal);
 
       final state =
@@ -3914,7 +3914,7 @@ void main() {
       final mockManager = _MockSshChannelManager();
       notifier.setChannelManagerForTesting(mockManager);
 
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       notifier.callSetConnectedStateForTesting(terminal);
 
       final state =
@@ -3931,7 +3931,7 @@ void main() {
       expect(notifier.isNotificationSentForTesting, isTrue,
           reason: 'precondition: _notificationSent must be true before calling _setConnectedState');
 
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       notifier.callSetConnectedStateForTesting(terminal);
 
       expect(notifier.isNotificationSentForTesting, isFalse,
@@ -3960,7 +3960,7 @@ void main() {
           reason: 'precondition: two keepAlive failures must accumulate to count 2');
 
       // Simulate a successful reconnect; _setConnectedState must reset the count.
-      notifier.callSetConnectedStateForTesting(Terminal(maxLines: 1000));
+      notifier.callSetConnectedStateForTesting(Terminal(maxLines: 50));
 
       expect(notifier.keepAliveFailCountForTesting, 0,
           reason: '_setConnectedState must reset _keepAliveFailCount to 0 so '

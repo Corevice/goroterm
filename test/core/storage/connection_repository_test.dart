@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:terminal_ssh_app/core/storage/connection_repository.dart';
@@ -7,6 +8,8 @@ import 'package:terminal_ssh_app/core/storage/database.dart';
 import 'package:terminal_ssh_app/core/storage/secure_storage.dart';
 
 class MockSecureStorageService extends Mock implements SecureStorageService {}
+
+class MockFlutterSecureStorageRepo extends Mock implements FlutterSecureStorage {}
 
 AppDatabase _openInMemory() => AppDatabase(NativeDatabase.memory());
 
@@ -181,6 +184,116 @@ void main() {
       expect(collected.last.first.label, 'Watched');
 
       await sub.cancel();
+    });
+  });
+
+  // =====================================================================
+  // secure_storage.dart
+  // =====================================================================
+  group('SecureStorageService', () {
+    late MockFlutterSecureStorageRepo mockSecureStorage;
+    late SecureStorageService secureService;
+
+    setUp(() {
+      mockSecureStorage = MockFlutterSecureStorageRepo();
+      secureService = SecureStorageService(storage: mockSecureStorage);
+    });
+
+    group('savePassword / loadPassword', () {
+      test('saves and loads password for a connection', () async {
+        when(() => mockSecureStorage.write(key: 'conn_pwd_1', value: 'secret'))
+            .thenAnswer((_) async {});
+        when(() => mockSecureStorage.read(key: 'conn_pwd_1'))
+            .thenAnswer((_) async => 'secret');
+
+        await secureService.savePassword(1, 'secret');
+        final result = await secureService.loadPassword(1);
+
+        expect(result, equals('secret'));
+        verify(() => mockSecureStorage.write(key: 'conn_pwd_1', value: 'secret'))
+            .called(1);
+      });
+
+      test('loadPassword returns null when not set', () async {
+        when(() => mockSecureStorage.read(key: 'conn_pwd_99'))
+            .thenAnswer((_) async => null);
+
+        expect(await secureService.loadPassword(99), isNull);
+      });
+    });
+
+    group('deletePassword', () {
+      test('deletes password so loadPassword returns null', () async {
+        when(() => mockSecureStorage.delete(key: 'conn_pwd_2'))
+            .thenAnswer((_) async {});
+        when(() => mockSecureStorage.read(key: 'conn_pwd_2'))
+            .thenAnswer((_) async => null);
+
+        await secureService.deletePassword(2);
+        expect(await secureService.loadPassword(2), isNull);
+        verify(() => mockSecureStorage.delete(key: 'conn_pwd_2')).called(1);
+      });
+    });
+
+    group('savePrivateKey / loadPrivateKey', () {
+      test('saves and loads private key for a connection', () async {
+        when(() => mockSecureStorage.write(
+              key: 'conn_key_3',
+              value: '-----BEGIN OPENSSH PRIVATE KEY-----',
+            )).thenAnswer((_) async {});
+        when(() => mockSecureStorage.read(key: 'conn_key_3'))
+            .thenAnswer((_) async => '-----BEGIN OPENSSH PRIVATE KEY-----');
+
+        await secureService.savePrivateKey(3, '-----BEGIN OPENSSH PRIVATE KEY-----');
+        expect(await secureService.loadPrivateKey(3), equals('-----BEGIN OPENSSH PRIVATE KEY-----'));
+        verify(() => mockSecureStorage.write(
+              key: 'conn_key_3',
+              value: '-----BEGIN OPENSSH PRIVATE KEY-----',
+            )).called(1);
+      });
+
+      test('loadPrivateKey returns null when not set', () async {
+        when(() => mockSecureStorage.read(key: 'conn_key_7'))
+            .thenAnswer((_) async => null);
+        expect(await secureService.loadPrivateKey(7), isNull);
+      });
+    });
+
+    group('savePassphrase / loadPassphrase', () {
+      test('saves and loads passphrase for a connection', () async {
+        when(() => mockSecureStorage.write(key: 'conn_pp_1', value: 'mypass'))
+            .thenAnswer((_) async {});
+        when(() => mockSecureStorage.read(key: 'conn_pp_1'))
+            .thenAnswer((_) async => 'mypass');
+
+        await secureService.savePassphrase(1, 'mypass');
+        expect(await secureService.loadPassphrase(1), equals('mypass'));
+        verify(() => mockSecureStorage.write(key: 'conn_pp_1', value: 'mypass'))
+            .called(1);
+      });
+
+      test('loadPassphrase returns null when not set', () async {
+        when(() => mockSecureStorage.read(key: 'conn_pp_42'))
+            .thenAnswer((_) async => null);
+        expect(await secureService.loadPassphrase(42), isNull);
+      });
+    });
+
+    group('deleteAllForConnection', () {
+      test('deletes password, private key, and passphrase together', () async {
+        when(() => mockSecureStorage.delete(key: 'conn_pwd_5'))
+            .thenAnswer((_) async {});
+        when(() => mockSecureStorage.delete(key: 'conn_key_5'))
+            .thenAnswer((_) async {});
+        when(() => mockSecureStorage.delete(key: 'conn_pp_5'))
+            .thenAnswer((_) async {});
+
+        await secureService.deleteAllForConnection(5);
+
+        verify(() => mockSecureStorage.delete(key: 'conn_pwd_5')).called(1);
+        verify(() => mockSecureStorage.delete(key: 'conn_key_5')).called(1);
+        verify(() => mockSecureStorage.delete(key: 'conn_pp_5')).called(1);
+      });
     });
   });
 }

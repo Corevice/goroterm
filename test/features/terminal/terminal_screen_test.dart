@@ -37,7 +37,7 @@ class _ConnectedNotifier extends TerminalConnectionNotifier {
   TerminalConnectionState build(String arg) {
     return TerminalConnectionState(
       status: ConnectionStatus.connected,
-      terminal: Terminal(maxLines: 1000),
+      terminal: Terminal(maxLines: 50),
       hostLabel: 'My Server',
     );
   }

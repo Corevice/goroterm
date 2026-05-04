@@ -183,9 +183,9 @@ void main() {
 
       // Open dropdown and select SSH Key
       await tester.tap(find.byType(DropdownButtonFormField<String>));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
       await tester.tap(find.text('SSH Key').last);
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
 
       expect(find.text('Private Key (PEM)'), findsOneWidget);
     });
@@ -195,9 +195,9 @@ void main() {
       await tester.pump();
 
       await tester.tap(find.byType(DropdownButtonFormField<String>));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
       await tester.tap(find.text('SSH Key').last);
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
 
       // Passphrase field may be off-screen in a scrollable list
       expect(
@@ -212,9 +212,9 @@ void main() {
       await tester.pump();
 
       await tester.tap(find.byType(DropdownButtonFormField<String>));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
       await tester.tap(find.text('SSH Key').last);
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
 
       // Button may be off-screen in a scrollable list
       expect(
@@ -235,9 +235,9 @@ void main() {
 
       // Switch to SSH Key
       await tester.tap(find.byType(DropdownButtonFormField<String>));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
       await tester.tap(find.text('SSH Key').last);
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
 
       // Fill required fields so overall form can validate
       await tester.enterText(
@@ -308,7 +308,7 @@ void main() {
       await tester.pumpWidget(
         _buildEdit(mockRepo: mockRepo, mockStorage: mockStorage),
       );
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       // After load completes, host and username should be filled
       expect(find.text('test.com'), findsOneWidget);

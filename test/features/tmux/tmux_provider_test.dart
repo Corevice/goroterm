@@ -1663,7 +1663,7 @@ void main() {
 
     // Path 2: terminal present → textInput writes the attach command.
     test('sends tmux attach command to the terminal', () async {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       final received = <String>[];
       terminal.onOutput = received.add;
 
@@ -1695,7 +1695,7 @@ void main() {
 
     // Path 2b: session name with special characters is shell-escaped.
     test('shell-escapes session names with spaces', () async {
-      final terminal = Terminal(maxLines: 1000);
+      final terminal = Terminal(maxLines: 50);
       final received = <String>[];
       terminal.onOutput = received.add;
 

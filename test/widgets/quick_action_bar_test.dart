@@ -292,7 +292,7 @@ void main() {
       expect(calls.length, greaterThan(2));
 
       await gesture.up();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
     });
 
     // -------------------------------------------------------------------------
@@ -400,7 +400,7 @@ void main() {
       // Cancel before the 80ms activation delay elapses.
       await tester.pump(const Duration(milliseconds: 30));
       await gesture.cancel();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
 
       expect(calls, isEmpty,
           reason: 'cancel before activation must not send any key event');
@@ -503,7 +503,7 @@ void main() {
           reason: 'deactivate() must cancel the repeat timer');
 
       await gesture.cancel();
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 10));
     });
   });
 
