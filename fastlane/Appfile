@@ -4,5 +4,5 @@ package_name("com.corevice.goroterm")
 
 # iOS
 app_identifier("com.corevice.goroterm")
-apple_id("takayuki.kawazoe@corevice.com")
+apple_id(ENV["APPLE_ID"] || "")
 team_id(ENV["APPLE_TEAM_ID"])

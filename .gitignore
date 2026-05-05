@@ -9,8 +9,12 @@
 private/
 *.p12
 *.p8
+*.jks
+*.keystore
 *.mobileprovision
 *.certSigningRequest
+key.properties
+**/key.properties
 
 # Screenshot working directory (raw captures, masked exports)
 screenshots/
