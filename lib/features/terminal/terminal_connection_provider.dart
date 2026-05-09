@@ -116,8 +116,7 @@ class TerminalConnectionNotifier
   Timer? _flushTimer;
   static const int _flushChunkSize = 64 * 1024; // 64 KB per flush
 
-  // リサイズ直後はチャンク分割を一時的に無効化する。
-  // tmux のリドロー出力を分割すると表示崩れの原因になるため。
+  // リサイズ直後はチャンクサイズを縮小して tmux リドロー出力の表示崩れを防止。
   Timer? _resizeGuardTimer;
   bool _resizeGuardActive = false;
 
@@ -265,12 +264,11 @@ class TerminalConnectionNotifier
           onOutput: _onTerminalOutput,
           onResize: (width, height, pixelWidth, pixelHeight) {
             _channelManager?.resizePty(width, height);
-            // リサイズ後 500ms はチャンク分割を無効化
-            // キーボードアニメーション中に複数回リサイズが発火するため
-            // tmux リドロー出力の分割を防止
+            // リサイズ後 200ms は小さなチャンクサイズ (32KB) を使用
+            // tmux リドロー出力の表示崩れを防止しつつ UI をブロックしない
             _resizeGuardActive = true;
             _resizeGuardTimer?.cancel();
-            _resizeGuardTimer = Timer(const Duration(milliseconds: 500), () {
+            _resizeGuardTimer = Timer(const Duration(milliseconds: 200), () {
               _resizeGuardActive = false;
               _resizeGuardTimer = null;
             });
@@ -330,19 +328,23 @@ class TerminalConnectionNotifier
     // Alt buffer 使用中（Claude Code プランモード等の TUI アプリ）では
     // チャンク分割しない。分割すると ANSI エスケープシーケンスが途中で切れ、
     // 画面が中途半端な状態でスタックする原因になる。
-    if (data.length <= _flushChunkSize ||
-        _resizeGuardActive ||
-        terminal.isUsingAltBuffer) {
-      // Small output, resize guard active, or alt buffer (TUI): write all at once
+    if (terminal.isUsingAltBuffer) {
+      _outputBuffer.clear();
+      terminal.write(data);
+    } else if (data.length <= _flushChunkSize && !_resizeGuardActive) {
+      // Small output: write all at once
       _outputBuffer.clear();
       terminal.write(data);
     } else {
-      // Large output: write one chunk now, put the rest back,
-      // and schedule the next chunk after a short delay so the
-      // UI thread can process input events and render a frame.
+      // Large output or resize guard: chunk to keep UI responsive.
+      // During resize guard use a smaller chunk (32KB) to avoid
+      // splitting tmux redraw sequences mid-output.
+      final chunkSize = _resizeGuardActive
+          ? 32 * 1024
+          : _flushChunkSize;
       _outputBuffer.clear();
-      terminal.write(data.substring(0, _flushChunkSize));
-      _outputBuffer.write(data.substring(_flushChunkSize));
+      terminal.write(data.substring(0, chunkSize));
+      _outputBuffer.write(data.substring(chunkSize));
       _flushTimer = Timer(
         const Duration(milliseconds: 8),
         () => _flushOutput(terminal),

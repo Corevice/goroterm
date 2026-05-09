@@ -1505,15 +1505,16 @@ void main() {
     });
 
     // Resize guard active → even large data is written all at once (no split).
-    test('resize guard suppresses chunking for large data', () {
+    test('resize guard uses smaller chunk size (32KB) for large data', () {
       const chunkSize = 64 * 1024;
       final data = 'D' * (chunkSize + 1000); // > 64 KB
 
       notifier.setResizeGuardActiveForTesting(true);
       final remaining = notifier.flushOutputForTesting(terminal, data);
 
-      expect(remaining, isEmpty,
-          reason: 'resize guard must disable chunking — all data written at once');
+      // resize guard 中は 32KB チャンクで分割（UI ブロック防止）
+      expect(remaining.length, chunkSize + 1000 - (32 * 1024),
+          reason: 'resize guard should use 32KB chunks instead of 64KB');
     });
 
     // Resize guard inactive → normal chunking applies.
