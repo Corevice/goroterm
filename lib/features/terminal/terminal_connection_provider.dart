@@ -265,12 +265,12 @@ class TerminalConnectionNotifier
           onOutput: _onTerminalOutput,
           onResize: (width, height, pixelWidth, pixelHeight) {
             _channelManager?.resizePty(width, height);
-            // リサイズ後 1500ms はチャンク分割を無効化
-            // キーボード表示アニメーション中に複数回リサイズが発火するため
-            // 十分な猶予を持たせて tmux リドロー出力の分割を防止
+            // リサイズ後 500ms はチャンク分割を無効化
+            // キーボードアニメーション中に複数回リサイズが発火するため
+            // tmux リドロー出力の分割を防止
             _resizeGuardActive = true;
             _resizeGuardTimer?.cancel();
-            _resizeGuardTimer = Timer(const Duration(milliseconds: 1500), () {
+            _resizeGuardTimer = Timer(const Duration(milliseconds: 500), () {
               _resizeGuardActive = false;
               _resizeGuardTimer = null;
             });
