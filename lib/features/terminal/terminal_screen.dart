@@ -1064,7 +1064,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         }
       },
       listenOptions: stt.SpeechListenOptions(
-        listenMode: stt.ListenMode.search,
+        listenMode: stt.ListenMode.dictation,
         autoPunctuation: false,
       ),
       localeId: voiceLang.localeId.isEmpty ? null : voiceLang.localeId,
