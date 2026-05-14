@@ -39,7 +39,7 @@ class TerminalView extends StatefulWidget {
     this.onSecondaryTapDown,
     this.onSecondaryTapUp,
     this.mouseCursor = SystemMouseCursors.text,
-    this.keyboardType = TextInputType.emailAddress,
+    this.keyboardType = TextInputType.text,
     this.keyboardAppearance = Brightness.dark,
     this.cursorType = TerminalCursorType.block,
     this.alwaysShowCursor = false,
