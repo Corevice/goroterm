@@ -28,6 +28,8 @@ jobs:
         run: flutter pub get
 
       - name: Build Windows (Release)
+        env:
+          CMAKE_GENERATOR: Visual Studio 17 2022
         run: flutter build windows --release
 
       - name: Package as ZIP
