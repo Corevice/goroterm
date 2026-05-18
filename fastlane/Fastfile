@@ -84,6 +84,28 @@ platform :ios do
     app_version = pubspec_content[/^version:\s*([0-9.]+)/, 1]
     UI.message("App version from pubspec.yaml: #{app_version}")
 
+    # Check if the version already exists in a terminal state (e.g. Rejected,
+    # Developer Removed) before attempting to submit. If the version is already
+    # In Review or Approved, skip to avoid "cannot create new version" errors.
+    begin
+      versions = get_app_info(
+        api_key: asc_api_key,
+        bundle_id: "com.corevice.goroterm",
+      )
+      current_versions = versions["data"]["attributes"]["currentVersion"]
+
+      UI.message("ASC currentVersion: #{current_versions['versionString']} (status: #{current_versions['status']})")
+
+      # If current version is already in review or approved, nothing to do.
+      if current_versions["versionString"] == app_version &&
+         ["READY_FOR_REVIEW", "IN_REVIEW", "WEBSITE_REMOVE", "APPROVED", "REMOVED"].include?(current_versions["status"])
+        UI.message("Version #{app_version} is already in state '#{current_versions['status']}' — nothing to submit")
+        return
+      end
+    rescue => e
+      UI.user_error!("Failed to check App Store version: #{e.message}")
+    end
+
     # ASC marks builds VALID for TestFlight before they are fully ready for
     # App Store submission. Without this longer wait, deliver fails with
     #   "The specified pre-release build could not be added"
@@ -105,6 +127,7 @@ platform :ios do
       reject_if_possible: true,
       version_check_wait_retry_limit: 15,
       precheck_include_in_app_purchases: false,
+      skip_app_version_update: true,
       submission_information: {
         export_compliance_uses_encryption: true,
         export_compliance_is_exempt: true,
