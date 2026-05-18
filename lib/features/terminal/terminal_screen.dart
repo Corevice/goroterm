@@ -1297,20 +1297,25 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         // scale=480:-2: 偶数次元（奇数だと一部エンコーダで失敗）
         // -fflags +genpts: iOS の不正タイムスタンプを補正
         // exit code + GIF magic bytes (GIF87a/GIF89a) + サイズの三重検証。
+        //
+        // SSHClient.run() doesn't invoke a shell, so compound commands
+        // (semicolons, $(), case) are not parsed. Wrap in bash -c '...' with
+        // double-quoted paths (inner shell escaping) for safe file paths.
         final gifPath = '$_uploadDir/${ts}_${fileName.split('.').first}.gif';
+        final rp = remotePath.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+        final gp = gifPath.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
         final ffmpegCmd =
-            "ffmpeg -loglevel error -fflags +genpts -i ${shellQuote(remotePath)}"
-            " -vf 'fps=10,scale=480:-2:flags=lanczos,split[a][b];"
+            "bash -c 'ffmpeg -loglevel error -fflags +genpts -i \"$rp\""
+            " -vf \"fps=10,scale=480:-2:flags=lanczos,split[a][b];"
             "[a]palettegen=stats_mode=diff[p];"
-            "[b][p]paletteuse=dither=bayer:bayer_scale=5'"
-            " -t 15 -an -y"
-            " ${shellQuote(gifPath)} 2>&1; "
-            "echo \"FFMPEG_EXIT=\$?\"; "
-            "sig=\$(head -c 4 ${shellQuote(gifPath)} 2>/dev/null); "
+            "[b][p]paletteuse=dither=bayer:bayer_scale=5\""
+            " -t 15 -an -y \"$gp\" 2>&1; "
+            "echo FFMPEG_EXIT=\$?; "
+            "sig=\$(head -c 4 \"$gp\" 2>/dev/null); "
             "case \"\$sig\" in GIF8) echo VALID_GIF=1 ;; *) echo VALID_GIF=0 ;; esac; "
-            "stat -c %s ${shellQuote(gifPath)} 2>/dev/null "
-            "|| stat -f %z ${shellQuote(gifPath)} 2>/dev/null "
-            "|| echo 0";
+            "stat -c %s \"$gp\" 2>/dev/null "
+            "|| stat -f %z \"$gp\" 2>/dev/null "
+            "|| echo 0'";
 
         if (mounted) {
           ScaffoldMessenger.of(context)
@@ -1344,14 +1349,23 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
             try {
               await channelManager.runCommand("rm -f ${shellQuote(gifPath)}");
             } catch (_) {}
+            // ffmpeg の stderr 出力を SnackBar に含めて原因を特定可能に
+            final errorLines = outStr.split('\n').where((l) => l.isNotEmpty &&
+                !l.startsWith('FFMPEG_EXIT=') &&
+                !l.startsWith('VALID_GIF=') &&
+                !RegExp(r'^\d+$').hasMatch(l.trim())).toList();
+            final rawMsg = errorLines.join(' ').trim();
+            final errorMessage = rawMsg.isNotEmpty
+                ? (rawMsg.length > 200 ? rawMsg.substring(0, 200) : rawMsg)
+                : 'exitCode=$exitCode gifSize=$gifSize';
             if (mounted) {
               ScaffoldMessenger.of(context)
                 ..hideCurrentSnackBar()
                 ..showSnackBar(
                   SnackBar(
-                    content: Text(AppLocalizations.of(context)
-                        .gifConversionFailed(remotePath)),
-                    duration: const Duration(seconds: 5),
+                    content: Text(
+                        '${AppLocalizations.of(context).gifConversionFailed(remotePath)} ($errorMessage)'),
+                    duration: const Duration(seconds: 10),
                   ),
                 );
             }
@@ -1364,8 +1378,8 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
               ..showSnackBar(
                 SnackBar(
                   content: Text(
-                      AppLocalizations.of(context).gifConversionFailed(remotePath)),
-                  duration: const Duration(seconds: 5),
+                      '${AppLocalizations.of(context).gifConversionFailed(remotePath)} ($e)'),
+                  duration: const Duration(seconds: 10),
                 ),
               );
           }
