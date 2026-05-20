@@ -1621,6 +1621,9 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
           onClaudeContinue: connectionState.terminal != null
               ? () => connectionState.terminal?.textInput('claude --continue\r')
               : null,
+          onClaudeSkip: connectionState.terminal != null
+              ? () => connectionState.terminal?.textInput('claude --dangerously-skip-permissions\r')
+              : null,
           onVoiceInput: connectionState.terminal != null ? _toggleVoiceInput : null,
           isListening: _isListening,
           onImagePaste: connectionState.terminal != null ? _pasteMedia : null,

@@ -18,6 +18,7 @@ class QuickActionBar extends StatelessWidget {
     this.onToggleSelectMode,
     this.onClaudeCommand,
     this.onClaudeContinue,
+    this.onClaudeSkip,
     this.onVoiceInput,
     this.isListening = false,
     this.onToggleKeyboard,
@@ -36,6 +37,7 @@ class QuickActionBar extends StatelessWidget {
   final VoidCallback? onToggleSelectMode;
   final VoidCallback? onClaudeCommand;
   final VoidCallback? onClaudeContinue;
+  final VoidCallback? onClaudeSkip;
   final VoidCallback? onVoiceInput;
   final bool isListening;
 
@@ -73,6 +75,11 @@ class QuickActionBar extends StatelessWidget {
                 _ActionButton(
                   icon: Icons.history,
                   onPressed: onClaudeContinue!,
+                ),
+              if (onClaudeSkip != null)
+                _ActionButton(
+                  icon: Icons.lock_open,
+                  onPressed: onClaudeSkip!,
                 ),
               _ActionButton(
                 label: 'C-j',
