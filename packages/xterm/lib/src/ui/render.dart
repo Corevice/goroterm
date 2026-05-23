@@ -55,6 +55,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     if (_terminal == terminal) return;
     if (attached) _terminal.removeListener(_onTerminalChange);
     _terminal = terminal;
+    _lastLinesLength = _terminal.buffer.lines.length;
     if (attached) _terminal.addListener(_onTerminalChange);
     _resizeTerminalIfNeeded();
     markNeedsLayout();
@@ -153,6 +154,10 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
   var _stickToBottom = true;
 
+  /// scrollback / alt buffer の行数。Terminal.write の度に呼ばれる
+  /// [_onTerminalChange] で「行数不変なら paint だけで足りる」を判定するために保持。
+  int _lastLinesLength = -1;
+
   void _onScroll() {
     _stickToBottom = _scrollOffset >= _maxScrollExtent;
     markNeedsLayout();
@@ -164,12 +169,22 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   }
 
   void _onTerminalChange() {
-    markNeedsLayout();
+    // lines.length が変わる = scrollback が増えた / alt buffer 切替 → layout 必要。
+    // 同一行を上書きしているだけ (プログレスバー, スピナー, vim 内表示更新) なら
+    // _maxScrollExtent は変わらないので paint だけで足りる。
+    final linesLength = _terminal.buffer.lines.length;
+    if (linesLength != _lastLinesLength) {
+      _lastLinesLength = linesLength;
+      markNeedsLayout();
+    } else {
+      markNeedsPaint();
+    }
     _notifyEditableRect();
   }
 
   void _onControllerUpdate() {
-    markNeedsLayout();
+    // selection / highlight 変化はレイアウトに影響しない。
+    markNeedsPaint();
   }
 
   @override
@@ -178,6 +193,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   @override
   void attach(PipelineOwner owner) {
     super.attach(owner);
+    _lastLinesLength = _terminal.buffer.lines.length;
     _offset.addListener(_onScroll);
     _terminal.addListener(_onTerminalChange);
     _controller.addListener(_onControllerUpdate);
