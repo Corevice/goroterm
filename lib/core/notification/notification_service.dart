@@ -7,18 +7,39 @@ class NotificationService {
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
 
+  /// Called when the user taps a notification while the app is running. The
+  /// payload is the [sessionId] passed to [showCommandFinished]. Set this
+  /// from the widget layer so we can route through Riverpod / Navigator.
+  void Function(String sessionId)? onSelectSession;
+
   Future<void> init() async {
     if (_initialized) return;
 
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosSettings = DarwinInitializationSettings();
+    // 起動時に通知許可ダイアログを出す (iOS / macOS)。
+    // Android 13+ の POST_NOTIFICATIONS は flutter_foreground_task 側で
+    // 接続時に要求しているため、ここでは未要求のままで OK。
+    const iosSettings = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: false,
+      requestSoundPermission: true,
+    );
     const settings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
     );
 
-    await _plugin.initialize(settings);
+    await _plugin.initialize(
+      settings,
+      onDidReceiveNotificationResponse: _handleResponse,
+    );
     _initialized = true;
+  }
+
+  void _handleResponse(NotificationResponse response) {
+    final payload = response.payload;
+    if (payload == null || payload.isEmpty) return;
+    onSelectSession?.call(payload);
   }
 
   /// セッションIDからAndroid通知IDを生成する（安定したハッシュ値）。
@@ -39,8 +60,16 @@ class NotificationService {
       importance: Importance.high,
       priority: Priority.high,
     );
-    const iosDetails = DarwinNotificationDetails();
-    const details = NotificationDetails(
+    // threadIdentifier に sessionId を入れて iOS 通知センターでセッション単位に
+    // 折り畳ませる。前面時もバナー表示するために present* を明示。
+    final iosDetails = DarwinNotificationDetails(
+      presentBanner: true,
+      presentList: true,
+      presentSound: true,
+      interruptionLevel: InterruptionLevel.active,
+      threadIdentifier: sessionId,
+    );
+    final details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
     );
@@ -54,6 +83,7 @@ class NotificationService {
       title,
       body ?? 'Terminal output has stopped.',
       details,
+      payload: sessionId,
     );
   }
 

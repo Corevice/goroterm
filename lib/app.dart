@@ -3,18 +3,49 @@ import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/navigation/navigator_key.dart';
+import 'core/notification/notification_service.dart';
 import 'core/theme/terminal_theme.dart';
 import 'core/theme/theme_provider.dart';
 import 'features/connections/connection_list_screen.dart';
 import 'features/connections/connection_edit_screen.dart';
+import 'features/terminal/session_manager.dart';
 import 'features/terminal/terminal_screen.dart';
 import 'features/settings/settings_screen.dart';
 
-class TerminalSshApp extends ConsumerWidget {
+class TerminalSshApp extends ConsumerStatefulWidget {
   const TerminalSshApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TerminalSshApp> createState() => _TerminalSshAppState();
+}
+
+class _TerminalSshAppState extends ConsumerState<TerminalSshApp> {
+  @override
+  void initState() {
+    super.initState();
+    // 通知タップ → 該当セッションをアクティブにして /terminal までナビゲート。
+    NotificationService.instance.onSelectSession = (sessionId) {
+      if (!mounted) return;
+      ref.read(sessionManagerProvider.notifier).setActiveSession(sessionId);
+      final navigator = globalNavigatorKey.currentState;
+      if (navigator == null) return;
+      // ConnectionList ('/') は残し、それ以外を剥がして /terminal を載せる。
+      // 既に /terminal にいる場合でも一度差し替えてアクティブタブを反映させる。
+      navigator.pushNamedAndRemoveUntil(
+        '/terminal',
+        (route) => route.isFirst,
+      );
+    };
+  }
+
+  @override
+  void dispose() {
+    NotificationService.instance.onSelectSession = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
     final locale = ref.watch(localeProvider);
 

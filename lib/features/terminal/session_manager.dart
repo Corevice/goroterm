@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/background/ssh_foreground_service.dart';
+import '../../core/notification/notification_service.dart';
 import 'terminal_connection_provider.dart';
 
 class TerminalSession {
@@ -65,6 +68,8 @@ class SessionManagerNotifier extends Notifier<SessionManagerState> {
         state.sessions.where((s) => s.sessionId != sessionId).toList();
     // Invalidate the connection provider for the removed session.
     ref.invalidate(terminalConnectionProvider(sessionId));
+    // タブが消えるので通知トレイに取り残された通知も掃除する。
+    unawaited(NotificationService.instance.cancelForSession(sessionId));
 
     String? newActive = state.activeSessionId;
     if (newActive == sessionId) {
