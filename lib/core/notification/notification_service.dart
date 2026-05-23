@@ -1,4 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+/// Android 通知チャンネル ID。一度作ったあとは設定変更不可なので固定値を保持する。
+const _kCommandFinishedChannelId = 'command_finished';
+const _kCommandFinishedChannelName = 'Command Finished';
+const _kCommandFinishedChannelDescription =
+    'Notifies when a long-running command completes';
 
 class NotificationService {
   NotificationService._();
@@ -17,22 +25,56 @@ class NotificationService {
 
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     // 起動時に通知許可ダイアログを出す (iOS / macOS)。
-    // Android 13+ の POST_NOTIFICATIONS は flutter_foreground_task 側で
-    // 接続時に要求しているため、ここでは未要求のままで OK。
-    const iosSettings = DarwinInitializationSettings(
+    // Android 13+ の POST_NOTIFICATIONS は init 後に Android 専用 API で要求する。
+    const darwinSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: false,
       requestSoundPermission: true,
     );
+    const linuxSettings =
+        LinuxInitializationSettings(defaultActionName: 'Open');
+    const windowsSettings = WindowsInitializationSettings(
+      appName: 'goroterm',
+      appUserModelId: 'Corevice.goroterm',
+      // GUID は通知 activation コールバックの登録に使われる。生成後は変えない。
+      guid: '2c2cca97-fc04-4cf9-9c39-5fd99c10d4a8',
+    );
     const settings = InitializationSettings(
       android: androidSettings,
-      iOS: iosSettings,
+      iOS: darwinSettings,
+      macOS: darwinSettings,
+      linux: linuxSettings,
+      windows: windowsSettings,
     );
 
     await _plugin.initialize(
       settings,
       onDidReceiveNotificationResponse: _handleResponse,
     );
+
+    // Android はチャンネル設定が一度作成すると変更不可。暗黙作成に頼らず、
+    // 起動時に明示作成して importance / sound / vibration をピン留めする。
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(const AndroidNotificationChannel(
+      _kCommandFinishedChannelId,
+      _kCommandFinishedChannelName,
+      description: _kCommandFinishedChannelDescription,
+      importance: Importance.high,
+      enableVibration: true,
+      playSound: true,
+    ));
+
+    // Android 13+ では通常通知も POST_NOTIFICATIONS が必要。
+    // 拒否時は false が返るが UI 誘導は今回スコープ外。
+    if (Platform.isAndroid) {
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+    }
+
     _initialized = true;
   }
 
@@ -53,15 +95,16 @@ class NotificationService {
   }) async {
     if (!_initialized) return;
 
-    const androidDetails = AndroidNotificationDetails(
-      'command_finished',
-      'Command Finished',
-      channelDescription: 'Notifies when a long-running command completes',
+    // groupKey に sessionId を入れて iOS の threadIdentifier と同様に
+    // セッション単位で通知センターでまとめる。
+    final androidDetails = AndroidNotificationDetails(
+      _kCommandFinishedChannelId,
+      _kCommandFinishedChannelName,
+      channelDescription: _kCommandFinishedChannelDescription,
       importance: Importance.high,
       priority: Priority.high,
+      groupKey: sessionId,
     );
-    // threadIdentifier に sessionId を入れて iOS 通知センターでセッション単位に
-    // 折り畳ませる。前面時もバナー表示するために present* を明示。
     final iosDetails = DarwinNotificationDetails(
       presentBanner: true,
       presentList: true,
@@ -72,6 +115,7 @@ class NotificationService {
     final details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
+      macOS: iosDetails,
     );
 
     final title = tabLabel != null
