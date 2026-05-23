@@ -1030,9 +1030,15 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
         }
       },
       onStatus: (status) {
+        // ボタンが ON のままなら連続入力のため自動で listen を再開する。
+        // ユーザーが停止した場合は _isListening = false なので再開しない。
         if (status == 'done' || status == 'notListening') {
-          if (mounted) {
-            setState(() => _isListening = false);
+          if (_isListening && mounted) {
+            Future.delayed(const Duration(milliseconds: 100), () {
+              if (_isListening && mounted) {
+                _startListening();
+              }
+            });
           }
         }
       },
@@ -1041,8 +1047,9 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
 
   void _toggleVoiceInput() {
     if (_isListening) {
-      _speech.stop();
+      // 自動再開ループを止めるため、stop() より先にフラグを落とす。
       setState(() => _isListening = false);
+      _speech.stop();
       return;
     }
 
@@ -1054,6 +1061,11 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     }
 
     setState(() => _isListening = true);
+    _startListening();
+  }
+
+  void _startListening() {
+    if (!_isListening || !mounted) return;
     final voiceLang = ref.read(voiceInputLanguageProvider);
     _speech.listen(
       onResult: (result) {
