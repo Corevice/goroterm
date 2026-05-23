@@ -31,6 +31,7 @@ import '../tunnels/tunnel_provider.dart';
 import '../../widgets/quick_action_bar.dart';
 import '../../core/utils/app_logger.dart';
 import '../../core/utils/shell_utils.dart';
+import '../../widgets/tmux_prefix_bar.dart';
 import '../../core/utils/url_utils.dart';
 import '../../widgets/terminal_scroll_interceptor.dart';
 import '../../core/notification/notification_service.dart';
@@ -112,6 +113,66 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
           behavior: SnackBarBehavior.floating,
         ),
       );
+  }
+
+  /// タブを × したときの動線。tmux タブのときは「detach か kill か」を聞く。
+  /// 通常タブはそのまま閉じる（既存挙動を維持）。
+  Future<void> _confirmTabClose(String sessionId) async {
+    final session = ref
+        .read(sessionManagerProvider)
+        .sessions
+        .where((s) => s.sessionId == sessionId)
+        .firstOrNull;
+    if (session == null) return;
+    final manager = ref.read(sessionManagerProvider.notifier);
+
+    final tmuxName = session.tmuxSessionName;
+    if (tmuxName == null) {
+      manager.removeSession(sessionId);
+      return;
+    }
+
+    final l = AppLocalizations.of(context);
+    final action = await showDialog<_TmuxCloseAction>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l.tmuxCloseDialogTitle),
+        content: Text(l.tmuxCloseDialogMessage(tmuxName)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(l.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(_TmuxCloseAction.kill),
+            child: Text(l.tmuxCloseKill),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(_TmuxCloseAction.detach),
+            child: Text(l.tmuxCloseKeepRunning),
+          ),
+        ],
+      ),
+    );
+    if (action == null) return;
+
+    if (action == _TmuxCloseAction.kill) {
+      // SSH 切断より先に kill-session を投げる。channelManager が null でも
+      // removeSession は実行する（タブ自体は閉じる）。
+      final channelManager =
+          ref.read(terminalConnectionProvider(sessionId)).channelManager;
+      try {
+        await channelManager
+            ?.runCommand('tmux kill-session -t ${shellQuote(tmuxName)}');
+      } catch (_) {
+        // kill 失敗は無視: server 不在等の理由で既に消えている可能性あり。
+      }
+    }
+    // detach は SSH を切るだけでクライアント情報も剥がれるので、明示的な
+    // detach-client は不要。removeSession が SSH 切断まで面倒を見る。
+
+    if (!mounted) return;
+    manager.removeSession(sessionId);
   }
 
   void _attachTmuxSession(int connectionId, String tmuxSessionName) {
@@ -444,9 +505,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             onSelect: (id) => ref
                 .read(sessionManagerProvider.notifier)
                 .setActiveSession(id),
-            onClose: (id) => ref
-                .read(sessionManagerProvider.notifier)
-                .removeSession(id),
+            onClose: _confirmTabClose,
             onReorder: (oldIndex, newIndex) => ref
                 .read(sessionManagerProvider.notifier)
                 .reorderSessions(oldIndex, newIndex),
@@ -1171,11 +1230,12 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       // シェルが ready になるまで待機（最小 300ms + 最大 5 秒）
       await notifier.waitForShellReady();
       if (!mounted) return;
-      final terminal =
-          ref.read(terminalConnectionProvider(widget.sessionId)).terminal;
-      if (terminal != null) {
-        terminal.textInput('tmux attach -t ${shellQuote(widget.tmuxSessionName!)}\r');
-      }
+      // attach コマンドと mouse / window-size の投入は tmuxProvider.attachSession
+      // に集約。再接続時の自動 re-attach (_autoReattachTmux) とも同じ
+      // buildTmuxAttachCommand を共有する。
+      ref
+          .read(tmuxProvider(widget.sessionId).notifier)
+          .attachSession(widget.tmuxSessionName!);
     }
 
     // 接続完了後の自動フォーカスは行わない。
@@ -1616,6 +1676,11 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
                   child: CircularProgressIndicator(),
                 ),
         ),
+        if (widget.tmuxSessionName != null &&
+            connectionState.terminal != null)
+          TmuxPrefixBar(
+            onSend: (text) => connectionState.terminal?.textInput(text),
+          ),
         QuickActionBar(
           onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {
             connectionState.terminal?.keyInput(key, ctrl: ctrl, shift: shift);
@@ -1678,3 +1743,5 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
     );
   }
 }
+
+enum _TmuxCloseAction { detach, kill }

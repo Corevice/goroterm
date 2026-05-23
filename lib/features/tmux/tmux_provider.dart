@@ -9,6 +9,7 @@ import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/utils/app_logger.dart';
 import '../../core/utils/shell_utils.dart';
 import '../terminal/terminal_connection_provider.dart';
+import 'tmux_commands.dart';
 import 'tmux_session_model.dart';
 
 class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
@@ -176,26 +177,33 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
   }
 
   /// Attaches to a session by writing the command to the PTY channel.
-  /// attach 前に mouse mode をオンにし、スワイプスクロールを有効化する。
+  /// 既存セッションを attach、無ければ作成、他クライアントは detach する
+  /// (`new-session -A -D`)。これによりモバイル ⇄ デスクトップで同じセッションを
+  /// 切り替えても表示サイズの奪い合いが起きない。
+  /// 同時に mouse mode と window-size latest を fire-and-forget で投入する。
   void attachSession(String name) {
     final connectionState = ref.read(terminalConnectionProvider(arg));
     final terminal = connectionState.terminal;
     if (terminal == null) return;
-    final escaped = shellQuote(name);
-    // セッションレベルで mouse mode を有効化（グローバル設定には影響しない）
-    _enableTmuxMouse(name);
-    terminal.textInput('tmux attach -t $escaped\r');
+    terminal.textInput(buildTmuxAttachCommand(name));
+    _applyTmuxSessionOptions(name);
   }
 
-  /// tmux セッションの mouse mode をオンにする。
+  /// セッションレベルの mouse mode と window-size latest を投入する。
   /// exec チャネルで実行するため PTY 出力には影響しない。
-  void _enableTmuxMouse(String sessionName) {
+  /// fire-and-forget: 失敗しても attach 自体に影響しない。
+  void _applyTmuxSessionOptions(String sessionName) {
     final channelManager = _channelManager;
     if (channelManager == null) return;
     final escaped = shellQuote(sessionName);
-    // fire-and-forget: 失敗しても attach 自体に影響しない
     _execCommand(channelManager, 'tmux set-option -t $escaped mouse on')
         .catchError((_) {});
+    // window-size latest は tmux 2.9+。古いバージョンでは set-option がエラー
+    // を返すが、catchError で握りつぶすので問題ない。
+    _execCommand(
+      channelManager,
+      'tmux set-option -t $escaped window-size latest',
+    ).catchError((_) {});
   }
 
   /// Starts periodic auto-refresh (every 10 seconds). Called when tmux drawer opens.

@@ -225,5 +225,10 @@
   "voiceInputAutoDetect": "自動検出",
   "voiceInputJapanese": "日本語",
   "voiceInputEnglish": "英語",
-  "voiceInputIndonesian": "インドネシア語"
+  "voiceInputIndonesian": "インドネシア語",
+
+  "tmuxCloseDialogTitle": "tmux タブを閉じる",
+  "tmuxCloseDialogMessage": "tmux セッション「{name}」をサーバー上でどうしますか？",
+  "tmuxCloseKeepRunning": "そのまま残す (detach)",
+  "tmuxCloseKill": "セッションを破棄 (kill)"
 }

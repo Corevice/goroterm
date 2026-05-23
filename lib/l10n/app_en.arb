@@ -263,5 +263,11 @@
   "voiceInputAutoDetect": "Auto-detect",
   "voiceInputJapanese": "日本語",
   "voiceInputEnglish": "English",
-  "voiceInputIndonesian": "Bahasa Indonesia"
+  "voiceInputIndonesian": "Bahasa Indonesia",
+
+  "tmuxCloseDialogTitle": "Close tmux tab",
+  "tmuxCloseDialogMessage": "What should happen to tmux session \"{name}\" on the server?",
+  "@tmuxCloseDialogMessage": { "placeholders": { "name": { "type": "String" } } },
+  "tmuxCloseKeepRunning": "Keep running (detach)",
+  "tmuxCloseKill": "Kill session"
 }

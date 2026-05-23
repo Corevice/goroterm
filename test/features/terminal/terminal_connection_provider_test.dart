@@ -2152,7 +2152,8 @@ void main() {
       expect(received, isNotEmpty,
           reason: 'tmux attach command must be sent to the terminal');
       final combined = received.join('');
-      expect(combined, contains("tmux attach -t 'my-session'\r"),
+      expect(combined,
+          contains("tmux new-session -A -D -s 'my-session'\r"),
           reason: 'command must include shell-quoted session name');
     });
 
@@ -2169,7 +2170,8 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 600));
 
       final combined = received.join('');
-      expect(combined, contains(r"tmux attach -t 'it'\''s'" "\r"),
+      expect(combined,
+          contains(r"tmux new-session -A -D -s 'it'\''s'" "\r"),
           reason: 'single quotes in session name must be escaped');
     });
 

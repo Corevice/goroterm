@@ -14,9 +14,9 @@ import '../../core/notification/notification_service.dart';
 import '../../core/ssh/connection_config.dart';
 import '../../core/ssh/ssh_client_service.dart';
 import '../../core/utils/app_logger.dart';
-import '../../core/utils/shell_utils.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/ssh/known_hosts_store.dart';
+import '../tmux/tmux_commands.dart';
 import 'host_key_dialog.dart';
 import 'session_manager.dart';
 
@@ -472,7 +472,7 @@ class TerminalConnectionNotifier
   void _autoReattachTmux(Terminal terminal) {
     if (_tmuxSessionName == null) return;
     AppLogger.instance.log('[SSH][$arg] auto-reattach tmux: $_tmuxSessionName');
-    final cmd = 'tmux attach -t ${shellQuote(_tmuxSessionName!)}\r';
+    final cmd = buildTmuxAttachCommand(_tmuxSessionName!);
 
     // シェルが ready（stdout に何か出力した）になるまで待機してからコマンドを送信。
     unawaited(waitForShellReady().then((_) async {

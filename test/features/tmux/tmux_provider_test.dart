@@ -1620,7 +1620,9 @@ void main() {
   // attachSession() — Phase 50
   //
   // attachSession() reads terminalConnectionProvider(arg) to get the PTY
-  // Terminal, then calls terminal.textInput('tmux attach -t <name>\r').
+  // Terminal, then calls terminal.textInput(buildTmuxAttachCommand(name)).
+  // The command is `tmux new-session -A -D -s <name>\r` so a single call
+  // both attaches an existing session and detaches other clients.
   //
   // Paths:
   //   1. terminal == null → early return, no textInput
@@ -1689,7 +1691,8 @@ void main() {
 
       // terminal.textInput outputs the command directly (synchronous).
       final combined = received.join('');
-      expect(combined, contains("tmux attach -t 'my-session'\r"),
+      expect(combined,
+          contains("tmux new-session -A -D -s 'my-session'\r"),
           reason: 'attachSession must write the shell-quoted attach command');
     });
 
@@ -1721,7 +1724,8 @@ void main() {
       notifier.attachSession('my session');
 
       final combined = received.join('');
-      expect(combined, contains("tmux attach -t 'my session'\r"));
+      expect(combined,
+          contains("tmux new-session -A -D -s 'my session'\r"));
     });
   });
 

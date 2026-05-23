@@ -225,5 +225,10 @@
   "voiceInputAutoDetect": "Deteksi otomatis",
   "voiceInputJapanese": "Bahasa Jepang",
   "voiceInputEnglish": "Bahasa Inggris",
-  "voiceInputIndonesian": "Bahasa Indonesia"
+  "voiceInputIndonesian": "Bahasa Indonesia",
+
+  "tmuxCloseDialogTitle": "Tutup tab tmux",
+  "tmuxCloseDialogMessage": "Bagaimana dengan sesi tmux \"{name}\" di server?",
+  "tmuxCloseKeepRunning": "Biarkan berjalan (detach)",
+  "tmuxCloseKill": "Akhiri sesi (kill)"
 }
