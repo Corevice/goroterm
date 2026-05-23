@@ -31,7 +31,6 @@ import '../tunnels/tunnel_provider.dart';
 import '../../widgets/quick_action_bar.dart';
 import '../../core/utils/app_logger.dart';
 import '../../core/utils/shell_utils.dart';
-import '../../widgets/tmux_prefix_bar.dart';
 import '../../core/utils/url_utils.dart';
 import '../../widgets/terminal_scroll_interceptor.dart';
 import '../../core/notification/notification_service.dart';
@@ -1676,11 +1675,6 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
                   child: CircularProgressIndicator(),
                 ),
         ),
-        if (widget.tmuxSessionName != null &&
-            connectionState.terminal != null)
-          TmuxPrefixBar(
-            onSend: (text) => connectionState.terminal?.textInput(text),
-          ),
         QuickActionBar(
           onKeyPressed: (key, {bool ctrl = false, bool shift = false}) {
             connectionState.terminal?.keyInput(key, ctrl: ctrl, shift: shift);
