@@ -1,10 +1,15 @@
 import '../../core/utils/shell_utils.dart';
 
 /// PTY に送る tmux attach コマンド (末尾 CR つき) を組み立てる。
-/// `new-session -A -D` で attach-or-create + 他クライアント detach を 1 発で行う。
+/// `new-session -A` で attach-or-create を 1 発で行う。
 /// `tmux_provider` (UI からの attach) と `terminal_connection_provider`
 /// (再接続後の自動 re-attach) の両方から共有して、コマンドのズレを防ぐ。
+///
+/// 注: 以前は `-D` を付けて他クライアントを強制 detach していたが、
+/// 「アプリがバックグラウンド復帰時に自分自身が detach される」現象が
+/// 発生したため取り除いた。複数端末で同じセッションを奪いたい場合は、
+/// ユーザーが手動で `tmux attach -d` を打てばよい。
 String buildTmuxAttachCommand(String sessionName) {
   final escaped = shellQuote(sessionName);
-  return 'tmux new-session -A -D -s $escaped\r';
+  return 'tmux new-session -A -s $escaped\r';
 }

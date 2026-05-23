@@ -2153,7 +2153,7 @@ void main() {
           reason: 'tmux attach command must be sent to the terminal');
       final combined = received.join('');
       expect(combined,
-          contains("tmux new-session -A -D -s 'my-session'\r"),
+          contains("tmux new-session -A -s 'my-session'\r"),
           reason: 'command must include shell-quoted session name');
     });
 
@@ -2171,7 +2171,7 @@ void main() {
 
       final combined = received.join('');
       expect(combined,
-          contains(r"tmux new-session -A -D -s 'it'\''s'" "\r"),
+          contains(r"tmux new-session -A -s 'it'\''s'" "\r"),
           reason: 'single quotes in session name must be escaped');
     });
 
