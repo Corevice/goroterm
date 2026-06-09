@@ -1,1 +1,1 @@
-• Baru: Port Tunnels — buka SSH local port forwarding ke kontainer Docker atau host apa pun yang dapat diakses dari server SSH, melalui tab "Tunnels" baru di drawer kanan. Beberapa tunnel dapat berjalan bersamaan dan otomatis pulih saat koneksi ulang.
+• Perbaikan: tampilan terminal yang rusak, lambat, atau macet saat menjalankan Claude Code atau aplikasi TUI lain di dalam tmux. Karakter CJK dan garis kotak tidak lagi berubah menjadi "�", output besar tidak lagi membekukan UI, dan escape sequence yang tidak valid tidak lagi mengunci layar.

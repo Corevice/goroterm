@@ -1,1 +1,1 @@
-• New: Port Tunnels — open SSH local port forwards to Docker containers (or any host the SSH server can reach) from the new "Tunnels" tab in the right drawer. Multiple tunnels run in parallel and auto-restore on reconnect.
+• Fixed: terminal rendering corruption, slowdowns, and freezes when running Claude Code or other TUI apps inside tmux. CJK and box-drawing characters no longer turn into "�", heavy output no longer freezes the UI, and malformed escape sequences can no longer wedge the screen.
