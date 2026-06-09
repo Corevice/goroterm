@@ -230,13 +230,22 @@ class EscapeParser {
 
     var param = 0;
     var hasParam = false;
+    var consumed = 0;
     while (true) {
       // The sequence isn't completed, just ignore it.
       if (_queue.isEmpty) {
+        if (consumed >= _maxSequenceLength) {
+          // 未終端のまま上限超過: シーケンスを破棄して確定する
+          // (finalByte = 0 はどのハンドラにも該当せず no-op になる)
+          _csi.params.clear();
+          _csi.finalByte = Ascii.NULL;
+          return true;
+        }
         return false;
       }
 
       final char = _queue.consume();
+      consumed++;
 
       if (char == Ascii.semicolon) {
         if (hasParam) {
@@ -1099,19 +1108,35 @@ class EscapeParser {
     return true;
   }
 
+  /// 未終端の DCS/OSC/CSI を打ち切るまでの最大捕捉長。
+  ///
+  /// 終端が届くまでパーサはシーケンス先頭へロールバックして待機するが、
+  /// その間 write のたびに保留分全体を再スキャンするため O(n²) になり、
+  /// 終端が永遠に来ない場合（バイナリの誤 cat 等）は以降の出力を全て
+  /// 飲み込んでフリーズする。上限到達時はシーケンスを破棄して先へ進む。
+  static const _maxSequenceLength = 65536;
+
   /// `ESC P ... ST` Device Control String (DCS).
   ///
   /// Consumes the payload up to ST (ESC \) or BEL and discards it.
   /// This prevents DCS payloads (e.g. Synchronized Output Mode
   /// `ESC P = 2026 h` used by INK/Claude Code) from corrupting the
   /// parser state when written as plain text.
+  ///
+  /// ペイロード内の ESC は終端 (`ESC \`) の場合のみシーケンスを閉じる。
+  /// tmux passthrough (`ESC P tmux; ...`) はペイロード内の ESC を
+  /// 二重化 (ESC ESC) するため、ESC+任意文字で終端扱いすると残りの
+  /// ペイロードが平文として画面に漏れてしまう。
   bool _escHandleDCS() {
+    var consumed = 0;
     while (true) {
       if (_queue.isEmpty) {
-        return false;
+        // 上限を超えても終端が来ない場合は捕捉済み分を破棄して確定する
+        return consumed >= _maxSequenceLength;
       }
 
       final char = _queue.consume();
+      consumed++;
 
       if (char == Ascii.BEL) {
         return true;
@@ -1119,10 +1144,14 @@ class EscapeParser {
 
       if (char == Ascii.ESC) {
         if (_queue.isEmpty) {
-          return false;
+          return consumed >= _maxSequenceLength;
         }
-        _queue.consume();
-        return true;
+        final next = _queue.consume();
+        consumed++;
+        if (next == Ascii.backslash) {
+          return true;
+        }
+        // ST 以外（二重化 ESC 等）はペイロードの一部として読み飛ばす
       }
     }
   }
@@ -1132,13 +1161,20 @@ class EscapeParser {
   bool _consumeOsc() {
     _osc.clear();
     final param = StringBuffer();
+    var consumed = 0;
 
     while (true) {
       if (_queue.isEmpty) {
+        if (consumed >= _maxSequenceLength) {
+          // 未終端のまま上限超過: シーケンスを破棄して確定する
+          _osc.clear();
+          return true;
+        }
         return false;
       }
 
       final char = _queue.consume();
+      consumed++;
 
       // OSC terminates with BEL
       if (char == Ascii.BEL) {
@@ -1149,6 +1185,10 @@ class EscapeParser {
       /// OSC terminates with ST
       if (char == Ascii.ESC) {
         if (_queue.isEmpty) {
+          if (consumed >= _maxSequenceLength) {
+            _osc.clear();
+            return true;
+          }
           return false;
         }
 

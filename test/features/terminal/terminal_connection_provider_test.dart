@@ -1529,12 +1529,13 @@ void main() {
           reason: '200 bytes should remain after first chunk when guard is off');
     });
 
-    // Alt buffer active → chunking disabled even for large data.
+    // Alt buffer active → chunking applies the same as the main buffer.
     //
-    // TUI アプリ（Claude Code プランモード等）は alt buffer を使用する。
-    // alt buffer 使用中にチャンク分割すると ANSI シーケンスが途中で切れて
-    // 表示が崩れるため、resize guard と同様に分割を抑制する必要がある。
-    test('alt buffer suppresses chunking for large data', () {
+    // tmux 接続中は常に alt buffer なので、ここで分割しないと蓄積分を
+    // 一括 write して UI スレッドが長時間ブロックされる（巨大出力で
+    // フリーズ）。ANSI シーケンス途中の分割はパーサのロールバック機構が
+    // 安全に処理するため、alt buffer でも分割してよい。
+    test('alt buffer chunks large data like the main buffer', () {
       const chunkSize = 64 * 1024;
       final data = 'F' * (chunkSize + 1000); // > 64 KB
 
@@ -1545,12 +1546,12 @@ void main() {
 
       final remaining = notifier.flushOutputForTesting(terminal, data);
 
-      expect(remaining, isEmpty,
-          reason: 'alt buffer must disable chunking — all data written at once');
+      expect(remaining.length, 1000,
+          reason: 'alt buffer must chunk too — 1000 bytes remain after 64 KB');
     });
 
-    // Alt buffer inactive → normal chunking applies.
-    test('alt buffer inactive restores normal chunking', () {
+    // Main buffer → normal chunking applies.
+    test('main buffer applies normal chunking', () {
       const chunkSize = 64 * 1024;
       final data = 'G' * (chunkSize + 300);
 
@@ -1562,6 +1563,21 @@ void main() {
 
       expect(remaining.length, 300,
           reason: '300 bytes should remain after first chunk on main buffer');
+    });
+
+    // チャンク境界がサロゲートペア（絵文字等）の真ん中に当たる場合は
+    // 1 code unit 手前で切ってペアを保護する。
+    test('chunk boundary does not split a surrogate pair', () {
+      const chunkSize = 64 * 1024;
+      // index 65535 (チャンク境界の直前) に絵文字の上位サロゲートが来る配置
+      final data = 'H' * (chunkSize - 1) + '🎉' + 'I' * 100;
+
+      final remaining = notifier.flushOutputForTesting(terminal, data);
+
+      expect(remaining.length, 102,
+          reason: 'emoji (2 code units) + 100 chars must remain intact');
+      expect(remaining.startsWith('🎉'), isTrue,
+          reason: 'the surrogate pair must not be split across writes');
     });
   });
 

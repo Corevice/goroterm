@@ -14,6 +14,7 @@ import '../../core/notification/notification_service.dart';
 import '../../core/ssh/connection_config.dart';
 import '../../core/ssh/ssh_client_service.dart';
 import '../../core/utils/app_logger.dart';
+import '../../core/utils/streaming_utf8_decoder.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/ssh/known_hosts_store.dart';
 import '../tmux/tmux_commands.dart';
@@ -113,6 +114,7 @@ class TerminalConnectionNotifier
   // so the UI thread can render a frame between chunks.
   // This prevents blocking during heavy output (e.g. Claude Code on tmux).
   final StringBuffer _outputBuffer = StringBuffer();
+  final StreamingUtf8Decoder _outputDecoder = StreamingUtf8Decoder();
   Timer? _flushTimer;
   static const int _flushChunkSize = 64 * 1024; // 64 KB per flush
 
@@ -282,7 +284,9 @@ class TerminalConnectionNotifier
       (data) {
         _shellOutputReceived = true;
         PtyByteRecorder.instance.record(arg, data);
-        _outputBuffer.write(utf8.decode(data, allowMalformed: true));
+        // チャンク境界で多バイト文字が分断されると U+FFFD に化けるため、
+        // 不完全な末尾バイトを次チャンクへ持ち越すストリーミングデコードを使う
+        _outputBuffer.write(_outputDecoder.decode(data));
         _flushTimer ??= Timer(
           const Duration(milliseconds: 16),
           () => _flushOutput(terminal),
@@ -325,32 +329,37 @@ class TerminalConnectionNotifier
 
     final data = _outputBuffer.toString();
 
-    // Alt buffer 使用中（Claude Code プランモード等の TUI アプリ）では
-    // チャンク分割しない。分割すると ANSI エスケープシーケンスが途中で切れ、
-    // 画面が中途半端な状態でスタックする原因になる。
-    if (terminal.isUsingAltBuffer) {
-      _outputBuffer.clear();
-      terminal.write(data);
-    } else if (data.length <= _flushChunkSize && !_resizeGuardActive) {
+    // リサイズ直後は小さめのチャンクで tmux リドローを流し、表示崩れと
+    // UI ブロックを両立して防ぐ。
+    final chunkSize = _resizeGuardActive ? 32 * 1024 : _flushChunkSize;
+
+    if (data.length <= chunkSize) {
       // Small output: write all at once
       _outputBuffer.clear();
       terminal.write(data);
-    } else {
-      // Large output or resize guard: chunk to keep UI responsive.
-      // During resize guard use a smaller chunk (32KB) to avoid
-      // splitting tmux redraw sequences mid-output.
-      final chunkSize = _resizeGuardActive
-          ? 32 * 1024
-          : _flushChunkSize;
-      _outputBuffer.clear();
-      terminal.write(data.substring(0, chunkSize));
-      _outputBuffer.write(data.substring(chunkSize));
-      _flushTimer = Timer(
-        const Duration(milliseconds: 8),
-        () => _flushOutput(terminal),
-      );
+      return;
     }
+
+    // Large output: chunk to keep UI responsive. tmux 使用中は常に
+    // alt buffer なので、ここで分割しないと蓄積分を一括 write して
+    // UI スレッドが長時間ブロックされる（巨大出力でフリーズ）。
+    // ANSI エスケープシーケンス途中の分割はパーサのロールバック機構が
+    // 安全に処理するため、サロゲートペアを割らないことだけ保証する。
+    var cut = chunkSize;
+    if (_isLeadSurrogate(data.codeUnitAt(cut - 1))) {
+      cut--;
+    }
+    _outputBuffer.clear();
+    terminal.write(data.substring(0, cut));
+    _outputBuffer.write(data.substring(cut));
+    _flushTimer = Timer(
+      const Duration(milliseconds: 8),
+      () => _flushOutput(terminal),
+    );
   }
+
+  /// [codeUnit] が UTF-16 上位サロゲート（絵文字等の前半）かどうか。
+  static bool _isLeadSurrogate(int codeUnit) => (codeUnit & 0xFC00) == 0xD800;
 
   void _onDisconnected() {
     // 既に切断済み・接続中なら何もしない
@@ -892,6 +901,7 @@ class TerminalConnectionNotifier
     _resizeGuardTimer = null;
     _resizeGuardActive = false;
     _outputBuffer.clear();
+    _outputDecoder.reset();
     _stdoutSubscription?.cancel();
     _doneCancelled = true;
     _channelManager?.dispose();
