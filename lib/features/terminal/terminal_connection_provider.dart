@@ -336,7 +336,7 @@ class TerminalConnectionNotifier
     if (data.length <= chunkSize) {
       // Small output: write all at once
       _outputBuffer.clear();
-      terminal.write(data);
+      _safeWrite(terminal, data);
       return;
     }
 
@@ -350,12 +350,28 @@ class TerminalConnectionNotifier
       cut--;
     }
     _outputBuffer.clear();
-    terminal.write(data.substring(0, cut));
+    _safeWrite(terminal, data.substring(0, cut));
     _outputBuffer.write(data.substring(cut));
     _flushTimer = Timer(
       const Duration(milliseconds: 8),
       () => _flushOutput(terminal),
     );
+  }
+
+  /// terminal.write() を例外から保護する。
+  ///
+  /// パーサ/バッファの不具合で write が throw すると、Timer コールバックが
+  /// 死んで以降の出力が一切描画されなくなり「画面が固まって入力も効かない」
+  /// 状態になる（EL1 at column 0 の RangeError で実際に発生）。例外時は
+  /// 該当チャンクを破棄してストリームを継続する。
+  void _safeWrite(Terminal terminal, String data) {
+    try {
+      terminal.write(data);
+    } catch (e, st) {
+      AppLogger.instance.log(
+        '[SSH][$arg] terminal.write threw: $e\n$st',
+      );
+    }
   }
 
   /// [codeUnit] が UTF-16 上位サロゲート（絵文字等の前半）かどうか。

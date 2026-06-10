@@ -190,7 +190,10 @@ class Buffer {
   /// cursor.
   void eraseLineToCursor() {
     currentLine.isWrapped = false;
-    currentLine.eraseRange(0, _cursorX, terminal.cursor);
+    // EL1 はカーソル位置を「含めて」消去する (xterm/tmux 互換)。
+    // 旧実装は end が exclusive でカーソルセルが残り、さらにカーソル列 0 では
+    // eraseRange(0, 0) が RangeError を投げて描画が止まっていた。
+    currentLine.eraseRange(0, _cursorX + 1, terminal.cursor);
   }
 
   /// Erases the line at the current cursor position.

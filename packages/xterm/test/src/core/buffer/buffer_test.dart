@@ -244,4 +244,55 @@ void main() {
       expect(terminal.buffer.lines[2].toString(), '');
     });
   });
+
+  group('Buffer.eraseLineToCursor()', () {
+    // EL1 (ESC [1K) がカーソル列 0 で来ると、旧実装は eraseRange(0, 0) →
+    // getWidth(-1) の RangeError でパーサごと描画を停止させていた。
+    // tmux のリドロー（Claude Code 起動後の追い書き等）で実際に発生する。
+    test('does not throw when the cursor is at column 0', () {
+      final terminal = Terminal();
+      terminal.resize(10, 3);
+      terminal.write('abcdef');
+      terminal.write('\x1b[1;1H'); // カーソルを列 0 へ
+      expect(() => terminal.write('\x1b[1K'), returnsNormally);
+      // EL1 はカーソル位置を含めて消去する
+      final line0 = terminal.buffer.lines[0].toString();
+      expect(line0, isNot(contains('a')));
+      expect(line0, contains('bcdef'));
+    });
+
+    test('erases through the cursor cell inclusively (xterm compat)', () {
+      final terminal = Terminal();
+      terminal.resize(10, 3);
+      terminal.write('abcdef');
+      terminal.write('\x1b[1;3H'); // カーソルを列 2 (0-based) へ
+      terminal.write('\x1b[1K');
+      // 列 0..2 が消え、'def' が残る
+      expect(terminal.buffer.lines[0].toString().trimLeft(), 'def');
+    });
+
+    test('ED1 (erase display to cursor) at column 0 does not throw', () {
+      final terminal = Terminal();
+      terminal.resize(10, 3);
+      terminal.write('123\r\n456\r\n789');
+      terminal.write('\x1b[2;1H'); // 2 行目の列 0
+      expect(() => terminal.write('\x1b[1J'), returnsNormally);
+      expect(terminal.buffer.lines[0].toString(), '');
+      expect(terminal.buffer.lines[2].toString(), '789');
+    });
+  });
+
+  group('BufferLine.eraseRange() bounds', () {
+    test('empty and out-of-range erases are no-ops', () {
+      final terminal = Terminal();
+      terminal.resize(5, 2);
+      terminal.write('abcde');
+      final line = terminal.buffer.lines[0];
+      expect(() => line.eraseRange(0, 0, terminal.cursor), returnsNormally);
+      expect(() => line.eraseRange(-3, -1, terminal.cursor), returnsNormally);
+      expect(() => line.eraseRange(3, 2, terminal.cursor), returnsNormally);
+      expect(() => line.eraseRange(10, 20, terminal.cursor), returnsNormally);
+      expect(line.toString(), 'abcde');
+    });
+  });
 }

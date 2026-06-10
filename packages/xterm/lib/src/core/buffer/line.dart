@@ -1,4 +1,4 @@
-import 'dart:math' show min;
+import 'dart:math' show max, min;
 import 'dart:typed_data';
 
 import 'package:xterm/src/core/buffer/cell_offset.dart';
@@ -135,6 +135,15 @@ class BufferLine with IndexedItem {
   /// Erase cells whose index satisfies [start] <= index < [end]. Erased cells
   /// are filled with [style].
   void eraseRange(int start, int end, CursorStyle style) {
+    // 範囲外アクセス防止: EL1 (ESC [1K) がカーソル列 0 で来ると
+    // eraseRange(0, 0) になり、旧実装は getWidth(-1) で RangeError を
+    // 投げてパーサごと描画を停止させていた。
+    start = max(start, 0);
+    end = min(end, _length);
+    if (start >= end) {
+      return;
+    }
+
     // reset cell one to the left if start is second cell of a wide char
     if (start > 0 && getWidth(start - 1) == 2) {
       eraseCell(start - 1, style);
@@ -145,7 +154,6 @@ class BufferLine with IndexedItem {
       eraseCell(end - 1, style);
     }
 
-    end = min(end, _length);
     for (var i = start; i < end; i++) {
       eraseCell(i, style);
     }
