@@ -1,10 +1,15 @@
 name: macOS Build Check
 
 # 署名・公証・配布なしのコンパイル確認専用。
-# Linux 開発環境では Swift をビルドできないため、macOS ネイティブコードの
-# 変更をリリース前にブランチ上で検証する目的で手動起動する。
+# Linux 開発環境では Swift をビルドできないため、macOS ネイティブコードに
+# 触れたブランチを push した時点でコンパイルを検証する。
 on:
   workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - 'macos/**'
+      - '.github/workflows/macos-build-check.yml'
 
 jobs:
   build:
