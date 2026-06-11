@@ -230,5 +230,6 @@
   "tmuxCloseDialogTitle": "tmux タブを閉じる",
   "tmuxCloseDialogMessage": "tmux セッション「{name}」をサーバー上でどうしますか？",
   "tmuxCloseKeepRunning": "そのまま残す (detach)",
+  "tabOpenInNewWindow": "新しいウィンドウで開く",
   "tmuxCloseKill": "セッションを破棄 (kill)"
 }

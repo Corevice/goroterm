@@ -9,12 +9,17 @@ import 'dart:io';
 import 'app.dart';
 import 'core/background/ssh_foreground_service.dart';
 import 'core/notification/notification_service.dart';
+import 'core/platform/detached_session_args.dart';
 import 'core/preferences/power_settings.dart';
 import 'core/storage/database.dart';
 import 'features/connections/connection_provider.dart';
 
-void main() async {
+void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // macOS のタブ分離ウィンドウ: ネイティブ側が第二エンジンの起動引数で
+  // 対象セッションを渡してくる。通常起動では null。
+  final detachedSession = DetachedSessionArgs.tryParse(args);
 
   // ユーザー設定（tick / TCP keepalive 間隔）を foreground service init より前に読む
   await PowerSettings.init();
@@ -45,7 +50,7 @@ void main() async {
       overrides: [
         databaseProvider.overrideWithValue(db),
       ],
-      child: const TerminalSshApp(),
+      child: TerminalSshApp(detachedSession: detachedSession),
     ),
   );
 }

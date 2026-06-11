@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/navigation/navigator_key.dart';
 import 'core/notification/notification_service.dart';
+import 'core/platform/detached_session_args.dart';
 import 'core/theme/terminal_theme.dart';
 import 'core/theme/theme_provider.dart';
 import 'features/connections/connection_list_screen.dart';
@@ -13,7 +14,11 @@ import 'features/terminal/terminal_screen.dart';
 import 'features/settings/settings_screen.dart';
 
 class TerminalSshApp extends ConsumerStatefulWidget {
-  const TerminalSshApp({super.key});
+  const TerminalSshApp({super.key, this.detachedSession});
+
+  /// macOS のタブ分離ウィンドウとして起動された場合の対象セッション。
+  /// 通常起動では null。
+  final DetachedSessionArgs? detachedSession;
 
   @override
   ConsumerState<TerminalSshApp> createState() => _TerminalSshAppState();
@@ -36,6 +41,23 @@ class _TerminalSshAppState extends ConsumerState<TerminalSshApp> {
         (route) => route.isFirst,
       );
     };
+
+    // タブ分離ウィンドウ: 起動引数のセッションをタブとして開き、
+    // 接続一覧を経由せず直接ターミナル画面へ遷移する。
+    final detached = widget.detachedSession;
+    if (detached != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(sessionManagerProvider.notifier).addTmuxSession(
+              connectionId: detached.connectionId,
+              tmuxSessionName: detached.tmuxSessionName,
+            );
+        globalNavigatorKey.currentState?.pushNamedAndRemoveUntil(
+          '/terminal',
+          (route) => route.isFirst,
+        );
+      });
+    }
   }
 
   @override

@@ -269,5 +269,6 @@
   "tmuxCloseDialogMessage": "What should happen to tmux session \"{name}\" on the server?",
   "@tmuxCloseDialogMessage": { "placeholders": { "name": { "type": "String" } } },
   "tmuxCloseKeepRunning": "Keep running (detach)",
+  "tabOpenInNewWindow": "Open in New Window",
   "tmuxCloseKill": "Kill session"
 }

@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:xterm/xterm.dart';
 
+import '../../core/platform/mac_window_service.dart';
 import '../../core/ssh/connection_config.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/ssh/ssh_key_manager.dart';
@@ -185,6 +186,33 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         connectionId: connectionId,
         tmuxSessionName: tmuxSessionName,
       );
+    }
+  }
+
+  /// タブを別ウィンドウへ分離する（macOS）。
+  ///
+  /// 新ウィンドウは自前の SSH 接続で同じ tmux セッションに attach するため、
+  /// 成功したらこちらのタブは閉じる（同一セッションへの二重 attach は
+  /// 画面サイズが小さい方に引っ張られるため避ける）。
+  Future<void> _detachTabToWindow(String sessionId) async {
+    final sessions = ref.read(sessionManagerProvider).sessions;
+    TerminalSession? session;
+    for (final s in sessions) {
+      if (s.sessionId == sessionId) {
+        session = s;
+        break;
+      }
+    }
+    final tmuxName = session?.tmuxSessionName;
+    if (session == null || tmuxName == null) return;
+
+    final ok = await MacWindowService.openSessionWindow(
+      connectionId: session.connectionId,
+      tmuxSessionName: tmuxName,
+      label: session.label,
+    );
+    if (ok && mounted) {
+      ref.read(sessionManagerProvider.notifier).removeSession(sessionId);
     }
   }
 
@@ -508,6 +536,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             onReorder: (oldIndex, newIndex) => ref
                 .read(sessionManagerProvider.notifier)
                 .reorderSessions(oldIndex, newIndex),
+            onDetachToWindow:
+                MacWindowService.isSupported ? _detachTabToWindow : null,
           ),
         ),
       ),
@@ -560,6 +590,7 @@ class _TabStrip extends StatefulWidget {
     required this.onSelect,
     required this.onClose,
     required this.onReorder,
+    this.onDetachToWindow,
   });
 
   final List<TerminalSession> sessions;
@@ -567,6 +598,10 @@ class _TabStrip extends StatefulWidget {
   final ValueChanged<String> onSelect;
   final ValueChanged<String> onClose;
   final void Function(int oldIndex, int newIndex) onReorder;
+
+  /// タブを別ウィンドウへ分離する（macOS のみ）。null なら右クリックメニューを
+  /// 出さない。tmux タブ以外は分離不可。
+  final ValueChanged<String>? onDetachToWindow;
 
   @override
   State<_TabStrip> createState() => _TabStripState();
@@ -604,6 +639,42 @@ class _TabStripState extends State<_TabStrip> {
     );
   }
 
+  /// タブの右クリックメニュー（macOS: 別ウィンドウで開く）。
+  Future<void> _showTabContextMenu(
+    BuildContext context,
+    Offset position,
+    String sessionId,
+  ) async {
+    final l = AppLocalizations.of(context);
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        overlay.size.width - position.dx,
+        overlay.size.height - position.dy,
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'detach',
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.open_in_new, size: 18),
+              const SizedBox(width: 10),
+              Text(l.tabOpenInNewWindow),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (selected == 'detach') {
+      widget.onDetachToWindow?.call(sessionId);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // 不要なキーを削除
@@ -633,9 +704,18 @@ class _TabStripState extends State<_TabStrip> {
             session.sessionId,
             () => GlobalKey(),
           );
+          final canDetach = widget.onDetachToWindow != null &&
+              session.tmuxSessionName != null;
           final dragChild = InkWell(
               key: tabKey,
               onTap: () => widget.onSelect(session.sessionId),
+              onSecondaryTapDown: canDetach
+                  ? (details) => _showTabContextMenu(
+                        context,
+                        details.globalPosition,
+                        session.sessionId,
+                      )
+                  : null,
               child: Container(
                 padding: const EdgeInsets.only(left: 8),
                 decoration: BoxDecoration(

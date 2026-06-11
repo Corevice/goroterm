@@ -230,5 +230,6 @@
   "tmuxCloseDialogTitle": "Tutup tab tmux",
   "tmuxCloseDialogMessage": "Bagaimana dengan sesi tmux \"{name}\" di server?",
   "tmuxCloseKeepRunning": "Biarkan berjalan (detach)",
+  "tabOpenInNewWindow": "Buka di Jendela Baru",
   "tmuxCloseKill": "Akhiri sesi (kill)"
 }
