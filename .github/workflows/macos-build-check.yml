@@ -36,5 +36,12 @@ jobs:
       - name: Install CocoaPods dependencies
         run: cd macos && pod install
 
-      - name: Build macOS app (Release, unsigned)
+      # Release 設定は Developer ID 署名を要求するが、このランナーには
+      # 証明書がない。コンパイル確認が目的なのでアドホック署名に差し替える。
+      - name: Switch Release signing to ad-hoc
+        run: |
+          sed -i '' 's/CODE_SIGN_IDENTITY = "Developer ID Application";/CODE_SIGN_IDENTITY = "-";/' macos/Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/OTHER_CODE_SIGN_FLAGS = "--timestamp";/OTHER_CODE_SIGN_FLAGS = "";/' macos/Runner.xcodeproj/project.pbxproj
+
+      - name: Build macOS app (Release, ad-hoc signed)
         run: flutter build macos --release
