@@ -1,1 +1,1 @@
-• Perbaikan: tampilan terminal yang rusak, lambat, atau macet saat menjalankan Claude Code atau aplikasi TUI lain di dalam tmux. Karakter CJK dan garis kotak tidak lagi berubah menjadi "�", output besar tidak lagi membekukan UI, dan escape sequence yang tidak valid tidak lagi mengunci layar.
+• Baru: Server Monitor kini menampilkan 5 proses teratas berdasarkan penggunaan memori, di samping 5 teratas berdasarkan CPU.
