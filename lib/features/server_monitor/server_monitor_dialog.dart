@@ -128,7 +128,7 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
     }
   }
 
-  static const _command = r"""echo '===HOSTNAME===' && hostname && echo '===UNAME===' && uname -sr && echo '===UPTIME===' && (uptime -p 2>/dev/null || uptime) && echo '===LOADAVG===' && cat /proc/loadavg && echo '===MEMORY===' && free -b | head -2 && echo '===DISK===' && (df -B1 --output=target,size,used,avail,pcent -x tmpfs -x devtmpfs 2>/dev/null || df -k) && echo '===PROCS===' && ps aux --sort=-%cpu | head -6 && echo '===END==='""";
+  static const _command = r"""echo '===HOSTNAME===' && hostname && echo '===UNAME===' && uname -sr && echo '===UPTIME===' && (uptime -p 2>/dev/null || uptime) && echo '===LOADAVG===' && cat /proc/loadavg && echo '===MEMORY===' && free -b | head -2 && echo '===DISK===' && (df -B1 --output=target,size,used,avail,pcent -x tmpfs -x devtmpfs 2>/dev/null || df -k) && echo '===PROCS===' && ps aux --sort=-%cpu | head -6 && echo '===PROCS_MEM===' && ps aux --sort=-%mem | head -6 && echo '===END==='""";
 
   Future<ServerInfo> _queryServerInfo(
       SshChannelManager channelManager) async {
@@ -424,120 +424,135 @@ class _ServerMonitorDialogState extends ConsumerState<ServerMonitorDialog> {
           const SizedBox(height: 12),
         ],
 
-        // Processes card
+        // Top processes by CPU
         if (info.processes.isNotEmpty)
-          _buildCard(
-            icon: Icons.list_alt,
+          _buildProcessCard(
+            l: l,
             title: l.topProcesses,
-            child: Column(
-              children: [
-                // Header row
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 36,
-                      child: Text('PID',
-                          style: const TextStyle(
-                              color: Colors.white38, fontSize: 11)),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 4,
-                      child: Text(l.columnCommand,
-                          style: const TextStyle(
-                              color: Colors.white38, fontSize: 11)),
-                    ),
-                    SizedBox(
-                      width: 56,
-                      child: Text(l.columnCpu,
-                          style: const TextStyle(
-                              color: Colors.white38, fontSize: 11),
-                          textAlign: TextAlign.right),
-                    ),
-                    SizedBox(
-                      width: 56,
-                      child: Text(l.columnMem,
-                          style: const TextStyle(
-                              color: Colors.white38, fontSize: 11),
-                          textAlign: TextAlign.right),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                ),
-                const Divider(color: Colors.white12, height: 8),
-                ...info.processes.map((p) {
-                  final isCritical = _isCriticalProcess(p);
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 36,
-                          child: Text(
-                            '${p.pid}',
-                            style: const TextStyle(
-                                color: Colors.white54, fontSize: 11),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          flex: 4,
-                          child: Text(
-                            p.command,
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 12),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        SizedBox(
-                          width: 56,
-                          child: Text(
-                            p.cpuPercent,
-                            style: const TextStyle(
-                                color: Colors.tealAccent, fontSize: 12),
-                            textAlign: TextAlign.right,
-                          ),
-                        ),
-                        SizedBox(
-                          width: 56,
-                          child: Text(
-                            p.memPercent,
-                            style: const TextStyle(
-                                color: Colors.lightBlueAccent,
-                                fontSize: 12),
-                            textAlign: TextAlign.right,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        IconButton(
-                          icon: Icon(
-                            isCritical
-                                ? Icons.lock
-                                : Icons.delete_outline,
-                            size: 16,
-                            color: isCritical
-                                ? Colors.white24
-                                : Colors.orangeAccent,
-                          ),
-                          onPressed: isCritical
-                              ? null
-                              : () => _showKillConfirm(p),
-                          tooltip: isCritical
-                              ? ''
-                              : l.killProcess,
-                          padding: EdgeInsets.zero,
-                          constraints:
-                              const BoxConstraints.tightFor(width: 28, height: 28),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ],
-            ),
+            processes: info.processes,
+          ),
+        if (info.processes.isNotEmpty) const SizedBox(height: 12),
+
+        // Top processes by memory
+        if (info.processesByMem.isNotEmpty)
+          _buildProcessCard(
+            l: l,
+            title: l.topProcessesByMemory,
+            processes: info.processesByMem,
           ),
       ],
+    );
+  }
+
+  /// Builds a "top processes" table card for the given [processes] list.
+  /// Used for both the CPU-sorted and memory-sorted rankings.
+  Widget _buildProcessCard({
+    required AppLocalizations l,
+    required String title,
+    required List<ProcessInfo> processes,
+  }) {
+    return _buildCard(
+      icon: Icons.list_alt,
+      title: title,
+      child: Column(
+        children: [
+          // Header row
+          Row(
+            children: [
+              SizedBox(
+                width: 36,
+                child: Text('PID',
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 11)),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 4,
+                child: Text(l.columnCommand,
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 11)),
+              ),
+              SizedBox(
+                width: 56,
+                child: Text(l.columnCpu,
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 11),
+                    textAlign: TextAlign.right),
+              ),
+              SizedBox(
+                width: 56,
+                child: Text(l.columnMem,
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 11),
+                    textAlign: TextAlign.right),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ),
+          const Divider(color: Colors.white12, height: 8),
+          ...processes.map((p) {
+            final isCritical = _isCriticalProcess(p);
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 36,
+                    child: Text(
+                      '${p.pid}',
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 11),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 4,
+                    child: Text(
+                      p.command,
+                      style:
+                          const TextStyle(color: Colors.white, fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 56,
+                    child: Text(
+                      p.cpuPercent,
+                      style: const TextStyle(
+                          color: Colors.tealAccent, fontSize: 12),
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 56,
+                    child: Text(
+                      p.memPercent,
+                      style: const TextStyle(
+                          color: Colors.lightBlueAccent, fontSize: 12),
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: Icon(
+                      isCritical ? Icons.lock : Icons.delete_outline,
+                      size: 16,
+                      color:
+                          isCritical ? Colors.white24 : Colors.orangeAccent,
+                    ),
+                    onPressed: isCritical ? null : () => _showKillConfirm(p),
+                    tooltip: isCritical ? '' : l.killProcess,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints.tightFor(width: 28, height: 28),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 

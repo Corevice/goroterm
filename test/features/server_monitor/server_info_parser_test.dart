@@ -26,6 +26,10 @@ Mounted on          1B-blocks        Used       Avail Use%
 USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
 root         1  8.5  2.1 111111 22222 ?        Ss   Jan01   1:00 /sbin/init
 www        100  3.2  1.0 222222 33333 ?        S    Jan02   2:00 nginx: worker process
+===PROCS_MEM===
+USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+postgres   200  1.1 45.3 999999 88888 ?        S    Jan01   5:00 postgres: writer
+java       300  2.0 30.7 888888 77777 ?        Sl   Jan03   9:00 java -jar app.jar
 ===END===
 ''';
 
@@ -75,6 +79,31 @@ www        100  3.2  1.0 222222 33333 ?        S    Jan02   2:00 nginx: worker p
 
       final second = info.processes[1];
       expect(second.command, 'nginx: worker process');
+    });
+
+    test('parses ps aux processes sorted by memory', () {
+      final info = ServerInfoParser.parse(fullOutput);
+      expect(info.processesByMem.length, 2);
+
+      final first = info.processesByMem[0];
+      expect(first.pid, 200);
+      expect(first.command, 'postgres: writer');
+      expect(first.memPercent, '45.3');
+      expect(first.cpuPercent, '1.1');
+
+      final second = info.processesByMem[1];
+      expect(second.command, 'java -jar app.jar');
+      expect(second.memPercent, '30.7');
+    });
+
+    test('processesByMem is empty when PROCS_MEM section is absent', () {
+      // 旧サーバ出力（PROCS_MEM なし）でも従来どおり動く。
+      final info = ServerInfoParser.parse(fullOutput.replaceAll(
+        RegExp(r'===PROCS_MEM===[\s\S]*?(?====END===)'),
+        '',
+      ));
+      expect(info.processesByMem, isEmpty);
+      expect(info.processes.length, 2);
     });
 
     // -------------------------------------------------------------------------

@@ -151,6 +151,7 @@
   "memory": "Memori",
   "disk": "Disk",
   "topProcesses": "Proses Teratas",
+  "topProcessesByMemory": "Proses Teratas (Memori)",
   "columnCommand": "PERINTAH",
   "columnCpu": "CPU%",
   "columnMem": "MEM%",

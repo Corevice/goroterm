@@ -151,6 +151,7 @@
   "memory": "メモリ",
   "disk": "ディスク",
   "topProcesses": "上位プロセス",
+  "topProcessesByMemory": "上位プロセス (メモリ)",
   "columnCommand": "コマンド",
   "columnCpu": "CPU%",
   "columnMem": "MEM%",

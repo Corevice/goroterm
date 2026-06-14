@@ -11,6 +11,7 @@ class ServerInfo {
     required this.memUsed,
     required this.disks,
     required this.processes,
+    this.processesByMem = const [],
   });
 
   final String hostname;
@@ -22,7 +23,13 @@ class ServerInfo {
   final int memTotal;
   final int memUsed;
   final List<DiskInfo> disks;
+
+  /// Top processes sorted by CPU usage (`ps aux --sort=-%cpu`).
   final List<ProcessInfo> processes;
+
+  /// Top processes sorted by memory usage (`ps aux --sort=-%mem`).
+  /// Empty when the server output predates the PROCS_MEM section.
+  final List<ProcessInfo> processesByMem;
 }
 
 /// Disk usage information for one mount point.
@@ -74,6 +81,7 @@ class ServerInfoParser {
     'MEMORY',
     'DISK',
     'PROCS',
+    'PROCS_MEM',
   ];
 
   static final _whitespace = RegExp(r'\s+');
@@ -90,6 +98,7 @@ class ServerInfoParser {
     final (memTotal, memUsed) = _parseMemory(sections['MEMORY'] ?? '');
     final disks = _parseDisks(sections['DISK'] ?? '');
     final processes = _parseProcesses(sections['PROCS'] ?? '');
+    final processesByMem = _parseProcesses(sections['PROCS_MEM'] ?? '');
 
     return ServerInfo(
       hostname: sections['HOSTNAME'] ?? 'unknown',
@@ -102,6 +111,7 @@ class ServerInfoParser {
       memUsed: memUsed,
       disks: disks,
       processes: processes,
+      processesByMem: processesByMem,
     );
   }
 
