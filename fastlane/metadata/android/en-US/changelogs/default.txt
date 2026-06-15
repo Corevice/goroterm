@@ -1,1 +1,1 @@
-• New: Server Monitor now lists the top 5 processes by memory usage, alongside the existing top 5 by CPU.
+• Improved: the tmux attach command no longer clutters your shell history (.bash_history, etc.).

@@ -1,1 +1,1 @@
-• Baru: Server Monitor kini menampilkan 5 proses teratas berdasarkan penggunaan memori, di samping 5 teratas berdasarkan CPU.
+• Peningkatan: perintah attach tmux tidak lagi memenuhi riwayat shell (.bash_history, dll.).
