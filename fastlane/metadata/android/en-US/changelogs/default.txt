@@ -1,1 +1,1 @@
-• Improved: the tmux attach command no longer clutters your shell history (.bash_history, etc.).
+• Improved: opening the tmux session list now refreshes to the latest sessions immediately.

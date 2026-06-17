@@ -1,1 +1,1 @@
-• Peningkatan: perintah attach tmux tidak lagi memenuhi riwayat shell (.bash_history, dll.).
+• Peningkatan: membuka daftar sesi tmux kini langsung memuat daftar sesi terbaru.
