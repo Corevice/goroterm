@@ -207,8 +207,13 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
   }
 
   /// Starts periodic auto-refresh (every 10 seconds). Called when tmux drawer opens.
+  ///
+  /// ドロワーを開いた瞬間に必ず最新のセッション一覧を取得する。タイマー
+  /// (10 秒周期) だけだと開いた直後はキャッシュされた前回の一覧が表示され、
+  /// 最新化が最大 10 秒遅れていた。先に即時 refresh を 1 回走らせて解消する。
   void startAutoRefresh() {
     _refreshTimer?.cancel();
+    refresh();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       refresh();
     });

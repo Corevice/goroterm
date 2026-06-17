@@ -951,6 +951,31 @@ void main() {
       // Disposing the container triggers ref.onDispose which cancels the timer.
       expect(() => container.dispose(), returnsNormally);
     });
+
+    // ドロワーを開いた瞬間 (startAutoRefresh) に即時 fetch が走ることを保証する。
+    // タイマー (10 秒) を待たずに最新のセッション一覧へ更新されること。
+    test('startAutoRefresh fetches the latest sessions immediately', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      final manager = _makeFullSuccessManager();
+      await container.read(tmuxProvider('refresh-now').future);
+      final notifier = container.read(tmuxProvider('refresh-now').notifier);
+      notifier.setChannelManager(manager);
+      // setChannelManager 起因の初期化 fetch が落ち着くまで待つ。
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      clearInteractions(manager);
+      notifier.startAutoRefresh();
+      // 即時 refresh が完了するのを待つ（タイマー周期 10 秒は待たない）。
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      notifier.stopAutoRefresh();
+
+      // タイマー発火前に list-sessions が少なくとも 1 回呼ばれている。
+      verify(() => manager.executeCommand(
+            any(that: contains('list-sessions')),
+          )).called(greaterThanOrEqualTo(1));
+    });
   });
 
   // ---------------------------------------------------------------------------
