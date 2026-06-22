@@ -1,1 +1,1 @@
-• Peningkatan (macOS): sesi tmux kini terbuka sebagai tab jendela native, sehingga tab bisa diseret untuk dipisah atau digabung seperti Safari dan Terminal.app.
+• Perbaikan (macOS): tab native yang dipisah menjadi jendela sendiri tidak bisa digabungkan kembali dengan tab lain.

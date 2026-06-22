@@ -1,1 +1,1 @@
-• Improved (macOS): tmux sessions now open as native window tabs, so you can drag tabs to tear them off or merge them like Safari and Terminal.app.
+• Fixed (macOS): a native tab torn off into its own window could not be merged back with other tabs.
