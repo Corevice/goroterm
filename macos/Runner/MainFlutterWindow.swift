@@ -38,8 +38,17 @@ func registerCommonChannels(controller: FlutterViewController) {
 class DetachedWindowManager: NSObject, NSWindowDelegate {
   static let shared = DetachedWindowManager()
 
+  /// セッションウィンドウ共通の tabbing 識別子。同じ識別子のウィンドウ同士は
+  /// macOS が 1 つのタブグループにまとめ、OS 標準のドラッグ切り離し・統合
+  /// (Safari やターミナル.app と同じ挙動) を無料で提供する。
+  static let sessionTabbingIdentifier =
+    NSWindow.TabbingIdentifier("goroterm-session")
+
   /// ウィンドウ → コントローラ。ウィンドウを閉じたらエンジンを停止する。
   private var controllers: [NSWindow: FlutterViewController] = [:]
+  /// 生成順のセッションウィンドウ。新規ウィンドウを既存グループのタブとして
+  /// 追加する際のホスト探索に使う。
+  private var sessionWindows: [NSWindow] = []
   private var windowCounter = 0
 
   func registerChannel(controller: FlutterViewController) {
@@ -103,16 +112,38 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
     window.contentViewController = controller
     window.setContentSize(NSSize(width: 960, height: 640))
     window.delegate = self
+    // OS 標準のウィンドウタブに参加させる。同じ識別子のセッションウィンドウ
+    // 同士が 1 グループにまとまり、ドラッグでの切り離し・統合が OS 任せになる。
+    window.tabbingIdentifier = DetachedWindowManager.sessionTabbingIdentifier
+    window.tabbingMode = .preferred
     controllers[window] = controller
+    sessionWindows.append(window)
 
-    // 既存ウィンドウと少しずらして表示する
-    window.center()
-    let offset = CGFloat((windowCounter % 8) * 24)
-    window.setFrameOrigin(NSPoint(
-      x: window.frame.origin.x + offset,
-      y: window.frame.origin.y - offset))
-    window.makeKeyAndOrderFront(nil)
+    // 既存のセッションウィンドウがあれば、その上にタブとして追加する。
+    // 無ければ単独ウィンドウとして開く (タブバーは 2 枚目以降で自動表示)。
+    if let host = hostWindowForNewTab() {
+      host.addTabbedWindow(window, ordered: .above)
+      window.makeKeyAndOrderFront(nil)
+    } else {
+      window.center()
+      let offset = CGFloat((windowCounter % 8) * 24)
+      window.setFrameOrigin(NSPoint(
+        x: window.frame.origin.x + offset,
+        y: window.frame.origin.y - offset))
+      window.makeKeyAndOrderFront(nil)
+    }
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  /// 新規セッションウィンドウを追加するタブグループのホストを返す。
+  /// アクティブなセッションウィンドウを優先し、無ければ既存のいずれかを使う。
+  private func hostWindowForNewTab() -> NSWindow? {
+    if let key = NSApp.keyWindow,
+       controllers[key] != nil,
+       key.isVisible {
+      return key
+    }
+    return sessionWindows.last(where: { $0.isVisible })
   }
 
   func windowWillClose(_ notification: Notification) {
@@ -120,6 +151,7 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
           let controller = controllers.removeValue(forKey: window) else {
       return
     }
+    sessionWindows.removeAll(where: { $0 == window })
     // ウィンドウごとエンジンを停止して SSH 接続等のリソースを解放する
     controller.engine.shutDownEngine()
   }
@@ -134,6 +166,11 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     registerCommonChannels(controller: flutterViewController)
+
+    // メインウィンドウはアプリ内タブバー (Flutter 製) を持つため、OS の
+    // セッションタブグループには参加させない。混ざると二重タブになって
+    // 紛らわしいので、自動タブ参加を無効にする。
+    self.tabbingMode = .disallowed
 
     super.awakeFromNib()
   }
