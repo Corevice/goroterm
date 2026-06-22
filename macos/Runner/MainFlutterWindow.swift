@@ -49,6 +49,9 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
   /// 生成順のセッションウィンドウ。新規ウィンドウを既存グループのタブとして
   /// 追加する際のホスト探索に使う。
   private var sessionWindows: [NSWindow] = []
+  /// 同一セッションの重複ウィンドウを防ぐためのキー (connectionId + 名前) →
+  /// ウィンドウの対応。同じセッションを再度開こうとしたら既存にフォーカスする。
+  private var sessionKeys: [NSWindow: String] = [:]
   private var windowCounter = 0
 
   func registerChannel(controller: FlutterViewController) {
@@ -87,6 +90,15 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
   private func openSessionWindow(
     connectionId: Int, tmuxSessionName: String, label: String
   ) {
+    // 同一セッションが既に開いていれば新規作成せず、そのタブを前面に出す。
+    let sessionKey = "\(connectionId)\u{0000}\(tmuxSessionName)"
+    if let existing = sessionKeys.first(where: { $0.value == sessionKey })?.key {
+      existing.makeKeyAndOrderFront(nil)
+      existing.tabGroup?.selectedWindow = existing
+      NSApp.activate(ignoringOtherApps: true)
+      return
+    }
+
     windowCounter += 1
 
     // tmux セッション名は任意文字列のため base64 で渡す
@@ -117,6 +129,7 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
     window.tabbingIdentifier = DetachedWindowManager.sessionTabbingIdentifier
     window.tabbingMode = .preferred
     controllers[window] = controller
+    sessionKeys[window] = sessionKey
     sessionWindows.append(window)
 
     // 既存のセッションウィンドウがあれば、その上にタブとして追加する。
@@ -152,7 +165,8 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
       return
     }
     sessionWindows.removeAll(where: { $0 == window })
-    // ウィンドウごとエンジンを停止して SSH 接続等のリソースを解放する
+    sessionKeys.removeValue(forKey: window)
+    // ウィンドウごとにエンジンを停止して SSH 接続等のリソースを解放する
     controller.engine.shutDownEngine()
   }
 }

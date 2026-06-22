@@ -176,6 +176,19 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   }
 
   void _attachTmuxSession(int connectionId, String tmuxSessionName) {
+    // macOS: 各 tmux セッションは OS ネイティブタブのウィンドウとして開く
+    // (Safari/ターミナル.app 風のドラッグ切り離し・統合)。ネイティブ側で
+    // 同一 (connectionId, セッション名) の重複ウィンドウは既存にフォーカス
+    // するため、ここでは毎回 openSessionWindow を呼ぶだけでよい。
+    if (MacWindowService.isSupported) {
+      MacWindowService.openSessionWindow(
+        connectionId: connectionId,
+        tmuxSessionName: tmuxSessionName,
+        label: 'tmux: $tmuxSessionName',
+      );
+      return;
+    }
+
     final manager = ref.read(sessionManagerProvider.notifier);
 
     final existingId = manager.findSessionByTmux(connectionId, tmuxSessionName);
@@ -523,23 +536,29 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             ],
           ),
         ],
-        // Show tab strip below title (always visible so the current tab name is shown)
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(36),
-          child: _TabStrip(
-            sessions: sessions,
-            activeSessionId: activeSession.sessionId,
-            onSelect: (id) => ref
-                .read(sessionManagerProvider.notifier)
-                .setActiveSession(id),
-            onClose: _confirmTabClose,
-            onReorder: (oldIndex, newIndex) => ref
-                .read(sessionManagerProvider.notifier)
-                .reorderSessions(oldIndex, newIndex),
-            onDetachToWindow:
-                MacWindowService.isSupported ? _detachTabToWindow : null,
-          ),
-        ),
+        // Show tab strip below title (always visible so the current tab name is shown).
+        // macOS では tmux セッションが OS ネイティブタブのウィンドウになるため、
+        // セッションが 1 つだけのとき (= 母艦の素のシェル / 各セッションウィンドウ)
+        // はアプリ内タブバーを出さない。ネイティブのウィンドウタイトル/タブが
+        // 名前を示すので冗長な 1 件タブを避ける。
+        bottom: (MacWindowService.isSupported && sessions.length <= 1)
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(36),
+                child: _TabStrip(
+                  sessions: sessions,
+                  activeSessionId: activeSession.sessionId,
+                  onSelect: (id) => ref
+                      .read(sessionManagerProvider.notifier)
+                      .setActiveSession(id),
+                  onClose: _confirmTabClose,
+                  onReorder: (oldIndex, newIndex) => ref
+                      .read(sessionManagerProvider.notifier)
+                      .reorderSessions(oldIndex, newIndex),
+                  onDetachToWindow:
+                      MacWindowService.isSupported ? _detachTabToWindow : null,
+                ),
+              ),
       ),
       body: GestureDetector(
         behavior: HitTestBehavior.translucent,
