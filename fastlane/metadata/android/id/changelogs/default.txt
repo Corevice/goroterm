@@ -1,1 +1,1 @@
-• Peningkatan: membuka daftar sesi tmux kini langsung memuat daftar sesi terbaru.
+• Peningkatan (macOS): sesi tmux kini terbuka sebagai tab jendela native, sehingga tab bisa diseret untuk dipisah atau digabung seperti Safari dan Terminal.app.

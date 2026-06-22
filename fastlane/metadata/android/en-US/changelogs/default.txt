@@ -1,1 +1,1 @@
-• Improved: opening the tmux session list now refreshes to the latest sessions immediately.
+• Improved (macOS): tmux sessions now open as native window tabs, so you can drag tabs to tear them off or merge them like Safari and Terminal.app.
