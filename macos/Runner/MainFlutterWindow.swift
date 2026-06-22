@@ -127,7 +127,11 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
     // OS 標準のウィンドウタブに参加させる。同じ識別子のセッションウィンドウ
     // 同士が 1 グループにまとまり、ドラッグでの切り離し・統合が OS 任せになる。
     window.tabbingIdentifier = DetachedWindowManager.sessionTabbingIdentifier
-    window.tabbingMode = .preferred
+    // .automatic にすること。.preferred を強制すると、ユーザーがタブを
+    // ドラッグで切り離した単独ウィンドウが再統合を受け付けなくなる
+    // (実機 macOS 26 で確認)。.automatic + 共有 tabbingIdentifier なら
+    // Safari/ターミナル.app と同じくユーザー操作で自由に切り離し・統合できる。
+    window.tabbingMode = .automatic
     controllers[window] = controller
     sessionKeys[window] = sessionKey
     sessionWindows.append(window)
