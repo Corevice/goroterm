@@ -1,1 +1,1 @@
-• Fixed (macOS): a native tab torn off into its own window could not be merged back with other tabs.
+• Fixed (macOS): left/right swipe now switches between native window tabs again.

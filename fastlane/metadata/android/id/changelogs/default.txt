@@ -1,1 +1,1 @@
-• Perbaikan (macOS): tab native yang dipisah menjadi jendela sendiri tidak bisa digabungkan kembali dengan tab lain.
+• Perbaikan (macOS): geser kiri/kanan kini kembali berpindah antar tab jendela native.
