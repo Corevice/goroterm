@@ -134,17 +134,18 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
     // OS 標準のウィンドウタブに参加させる。同じ識別子のセッションウィンドウ
     // 同士が 1 グループにまとまり、ドラッグでの切り離し・統合が OS 任せになる。
     window.tabbingIdentifier = DetachedWindowManager.sessionTabbingIdentifier
-    // .automatic にすること。.preferred を強制すると、ユーザーがタブを
-    // ドラッグで切り離した単独ウィンドウが再統合を受け付けなくなる
-    // (実機 macOS 26 で確認)。.automatic + 共有 tabbingIdentifier なら
-    // Safari/ターミナル.app と同じくユーザー操作で自由に切り離し・統合できる。
-    window.tabbingMode = .automatic
+    // .preferred にすること。macOS の「タブの使用環境設定」が
+    // "フルスクリーン時のみ"(inFullScreen) 等だと、.automatic は通常ウィンドウ
+    // でのタブ統合を一切無効にしてしまう (実機 macOS 26 で確認)。.preferred は
+    // このシステム設定を上書きし、通常ウィンドウでもドラッグでの切り離し・
+    // 統合を有効にする。
+    window.tabbingMode = .preferred
     controllers[window] = controller
     sessionKeys[window] = sessionKey
     sessionWindows.append(window)
 
     // 既存のセッションウィンドウがあれば、その上にタブとして追加する。
-    // 無ければ単独ウィンドウとして開く (タブバーは 2 枚目以降で自動表示)。
+    // 無ければ単独ウィンドウとして開く。
     if let host = hostWindowForNewTab() {
       host.addTabbedWindow(window, ordered: .above)
       window.makeKeyAndOrderFront(nil)
@@ -156,7 +157,17 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
         y: window.frame.origin.y - offset))
       window.makeKeyAndOrderFront(nil)
     }
+    // タブが 1 枚でもタブバーを常時表示する。単独ウィンドウだとタブバーが
+    // 隠れて「別タブのドロップ先」が見えず統合できないため、明示的に出す。
+    forceShowTabBar(window)
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  /// ウィンドウのタブバーが隠れていれば表示する（ドロップ先を常に見せる）。
+  private func forceShowTabBar(_ window: NSWindow) {
+    if window.tabGroup?.isTabBarVisible == false {
+      window.toggleTabBar(nil)
+    }
   }
 
   /// 新規セッションウィンドウを追加するタブグループのホストを返す。
@@ -168,6 +179,16 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
       return key
     }
     return sessionWindows.last(where: { $0.isVisible })
+  }
+
+  func windowDidBecomeKey(_ notification: Notification) {
+    guard let window = notification.object as? NSWindow,
+          controllers[window] != nil else { return }
+    // タブを切り離して単独になったウィンドウはタブバーが隠れるため、
+    // フォーカスが当たったタイミングで出し直してドロップ先を見せ続ける。
+    if (window.tabGroup?.windows.count ?? 1) <= 1 {
+      forceShowTabBar(window)
+    }
   }
 
   func windowWillClose(_ notification: Notification) {
