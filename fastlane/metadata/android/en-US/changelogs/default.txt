@@ -1,1 +1,1 @@
-• Fixed (macOS): left/right swipe now switches between native window tabs again.
+• Fixed (macOS): you can now merge another tab into a window that has only one tab.

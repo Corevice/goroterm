@@ -1,1 +1,1 @@
-• Perbaikan (macOS): geser kiri/kanan kini kembali berpindah antar tab jendela native.
+• Perbaikan (macOS): kini Anda bisa menggabungkan tab lain ke jendela yang hanya punya satu tab.
