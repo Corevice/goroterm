@@ -175,6 +175,25 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     manager.removeSession(sessionId);
   }
 
+  /// 左右スワイプでタブを移動する。
+  /// アプリ内タブが複数あればそれを切り替え、そうでなければ (macOS の
+  /// 1 セッション/ウィンドウ時) OS ネイティブタブの隣へ移動する。
+  void _switchTab(List<TerminalSession> sessions, int activeIdx,
+      {required bool next}) {
+    if (sessions.length > 1) {
+      final target = next ? activeIdx + 1 : activeIdx - 1;
+      if (target >= 0 && target < sessions.length) {
+        ref
+            .read(sessionManagerProvider.notifier)
+            .setActiveSession(sessions[target].sessionId);
+      }
+      return;
+    }
+    if (MacWindowService.isSupported) {
+      MacWindowService.selectAdjacentTab(next: next);
+    }
+  }
+
   void _attachTmuxSession(int connectionId, String tmuxSessionName) {
     // macOS: 各 tmux セッションは OS ネイティブタブのウィンドウとして開く
     // (Safari/ターミナル.app 風のドラッグ切り離し・統合)。ネイティブ側で
@@ -562,26 +581,19 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       ),
       body: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onHorizontalDragEnd: sessions.length > 1
-            ? (details) {
-                final velocity = details.primaryVelocity ?? 0;
-                if (velocity > 300) {
-                  // 右スワイプ → 前のタブ
-                  if (activeIdx > 0) {
-                    ref
-                        .read(sessionManagerProvider.notifier)
-                        .setActiveSession(sessions[activeIdx - 1].sessionId);
+        // 複数のアプリ内タブがあるとき、または macOS (各セッションが
+        // OS ネイティブタブの別ウィンドウ) のとき、左右スワイプでタブを移動。
+        onHorizontalDragEnd:
+            (sessions.length > 1 || MacWindowService.isSupported)
+                ? (details) {
+                    final velocity = details.primaryVelocity ?? 0;
+                    if (velocity > 300) {
+                      _switchTab(sessions, activeIdx, next: false);
+                    } else if (velocity < -300) {
+                      _switchTab(sessions, activeIdx, next: true);
+                    }
                   }
-                } else if (velocity < -300) {
-                  // 左スワイプ → 次のタブ
-                  if (activeIdx < sessions.length - 1) {
-                    ref
-                        .read(sessionManagerProvider.notifier)
-                        .setActiveSession(sessions[activeIdx + 1].sessionId);
-                  }
-                }
-              }
-            : null,
+                : null,
         child: IndexedStack(
           index: activeIdx,
           children: sessions

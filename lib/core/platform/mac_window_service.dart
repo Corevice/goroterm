@@ -17,6 +17,22 @@ class MacWindowService {
   /// タブ分離をサポートするプラットフォームかどうか。
   static bool get isSupported => !kIsWeb && Platform.isMacOS;
 
+  /// 現在のウィンドウが属する OS ネイティブタブグループで、隣のタブへ移動する。
+  /// [next] が true なら次のタブ、false なら前のタブ。
+  ///
+  /// アプリ内タブを廃した macOS では、ターミナルの左右スワイプをこの
+  /// ネイティブタブ切り替えに繋ぐことでタブ間移動を復活させる。
+  static Future<void> selectAdjacentTab({required bool next}) async {
+    if (!isSupported) return;
+    try {
+      await _channel.invokeMethod<void>(
+        next ? 'selectNextTab' : 'selectPreviousTab',
+      );
+    } catch (e) {
+      AppLogger.instance.log('[multi-window] selectAdjacentTab failed: $e');
+    }
+  }
+
   /// 指定 tmux セッションを表示する新しいウィンドウを開く。
   /// 成功したら true。非対応環境・ネイティブ側エラー時は false。
   static Future<bool> openSessionWindow({

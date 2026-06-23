@@ -81,6 +81,13 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
           tmuxSessionName: tmuxSessionName,
           label: label)
         result(true)
+      case "selectNextTab":
+        // フォーカス中ウィンドウのタブグループで次のタブへ。
+        NSApp.keyWindow?.selectNextTab(nil)
+        result(true)
+      case "selectPreviousTab":
+        NSApp.keyWindow?.selectPreviousTab(nil)
+        result(true)
       default:
         result(FlutterMethodNotImplemented)
       }
