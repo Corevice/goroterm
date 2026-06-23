@@ -164,9 +164,16 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
   }
 
   /// ウィンドウのタブバーが隠れていれば表示する（ドロップ先を常に見せる）。
+  ///
+  /// makeKeyAndOrderFront/addTabbedWindow の直後に同期で toggleTabBar を
+  /// 呼ぶとタイミングが早すぎてタブバーが出ないことがある (実機で確認)。
+  /// 次のラン ループまで遅延させてから判定・表示する。
   private func forceShowTabBar(_ window: NSWindow) {
-    if window.tabGroup?.isTabBarVisible == false {
-      window.toggleTabBar(nil)
+    DispatchQueue.main.async { [weak window] in
+      guard let window = window else { return }
+      if window.tabGroup?.isTabBarVisible == false {
+        window.toggleTabBar(nil)
+      }
     }
   }
 
