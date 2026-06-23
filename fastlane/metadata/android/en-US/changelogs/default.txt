@@ -1,1 +1,1 @@
-• Fixed (macOS): you can now merge another tab into a window that has only one tab.
+• Fixed (macOS): single-tab windows now always show the tab bar, so you can drag and merge other tabs into them.

@@ -1,1 +1,1 @@
-• Perbaikan (macOS): kini Anda bisa menggabungkan tab lain ke jendela yang hanya punya satu tab.
+• Perbaikan (macOS): jendela dengan satu tab kini selalu menampilkan tab bar, sehingga tab lain bisa diseret dan digabungkan.
