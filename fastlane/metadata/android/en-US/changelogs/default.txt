@@ -1,1 +1,2 @@
-• Fixed (macOS): single-tab windows now always show the tab bar, so you can drag and merge other tabs into them.
+• Fixed: a screen-size change on one device no longer triggers a flood of false completion notifications when the same session is open on another device.
+• Improved (macOS): hover a tab to see its full name, and the Claude Code working indicator is back on tabs.

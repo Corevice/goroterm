@@ -1,1 +1,2 @@
-• Perbaikan (macOS): jendela dengan satu tab kini selalu menampilkan tab bar, sehingga tab lain bisa diseret dan digabungkan.
+• Perbaikan: perubahan ukuran layar di satu perangkat tidak lagi memicu banjir notifikasi selesai palsu saat sesi yang sama terbuka di perangkat lain.
+• Peningkatan (macOS): arahkan kursor ke tab untuk melihat nama lengkap, dan indikator Claude Code yang sedang bekerja kembali muncul di tab.
