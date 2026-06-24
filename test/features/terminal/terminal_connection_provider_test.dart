@@ -1694,6 +1694,30 @@ void main() {
       });
     });
 
+    // リサイズ嵐対策: Claude が稼働していなければ、閾値超え＋30s 静止でも
+    // 通知を送らない（共有セッションの全画面再描画による誤通知を防ぐ）。
+    test('no notification fires when Claude was not running (resize redraw)',
+        () {
+      fakeAsync((async) {
+        notifier.setClaudeSeenRunningForTesting(false);
+        notifier.addOutputBytesForTesting(4096);
+        async.elapse(const Duration(seconds: 30));
+        expect(notifier.isNotificationSentForTesting, isFalse,
+            reason: 'resize redraw (Claude idle) must not notify');
+      });
+    });
+
+    // Claude が稼働していた場合は従来どおり完了通知を送る。
+    test('notification fires when Claude was running then went idle', () {
+      fakeAsync((async) {
+        notifier.setClaudeSeenRunningForTesting(true);
+        notifier.addOutputBytesForTesting(4096);
+        async.elapse(const Duration(seconds: 30));
+        expect(notifier.isNotificationSentForTesting, isTrue,
+            reason: 'Claude run→idle completion must notify');
+      });
+    });
+
     test('no idle timer created when _notificationSent is true', () {
       // _notificationSent == true ガード: 通知済みなら、バイト数が閾値以上でも
       // 新しいタイマーを作成しない（重複通知を防ぐ）。

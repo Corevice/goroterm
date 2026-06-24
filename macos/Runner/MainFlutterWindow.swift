@@ -52,7 +52,15 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
   /// 同一セッションの重複ウィンドウを防ぐためのキー (connectionId + 名前) →
   /// ウィンドウの対応。同じセッションを再度開こうとしたら既存にフォーカスする。
   private var sessionKeys: [NSWindow: String] = [:]
+  /// タブに表示する基本名 (tmux セッション名)。スピナー表示時の復元に使う。
+  private var tabBaseNames: [NSWindow: String] = [:]
   private var windowCounter = 0
+
+  /// Claude Code 稼働中のセッションキー集合と、スピナーアニメーション用タイマー。
+  private var runningKeys: Set<String> = []
+  private var spinnerTimer: Timer?
+  private var spinnerFrame = 0
+  private let spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
   func registerChannel(controller: FlutterViewController) {
     let channel = FlutterMethodChannel(
@@ -87,6 +95,17 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
         result(true)
       case "selectPreviousTab":
         NSApp.keyWindow?.selectPreviousTab(nil)
+        result(true)
+      case "setTabRunning":
+        guard let args = call.arguments as? [String: Any],
+              let connectionId = args["connectionId"] as? Int,
+              let tmuxSessionName = args["tmuxSessionName"] as? String,
+              let running = args["running"] as? Bool else {
+          result(false)
+          return
+        }
+        let key = "\(connectionId)\u{0000}\(tmuxSessionName)"
+        self.setTabRunning(key: key, running: running)
         result(true)
       default:
         result(FlutterMethodNotImplemented)
@@ -160,7 +179,55 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
     // タブが 1 枚でもタブバーを常時表示する。単独ウィンドウだとタブバーが
     // 隠れて「別タブのドロップ先」が見えず統合できないため、明示的に出す。
     forceShowTabBar(window)
+
+    // タブ表示名は短い tmux セッション名にして省略を減らし、ホバーの
+    // ツールチップに完全名 (label) を出す。
+    tabBaseNames[window] = tmuxSessionName
+    DispatchQueue.main.async { [weak window] in
+      guard let window = window else { return }
+      window.tab.title = tmuxSessionName
+      window.tab.toolTip = label
+    }
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  /// sessionKey に対応するセッションウィンドウを返す。
+  private func window(forSessionKey key: String) -> NSWindow? {
+    return sessionKeys.first(where: { $0.value == key })?.key
+  }
+
+  /// タブの Claude Code 稼働インジケータ (スピナー) を更新する。
+  private func setTabRunning(key: String, running: Bool) {
+    if running {
+      runningKeys.insert(key)
+      if spinnerTimer == nil {
+        spinnerTimer = Timer.scheduledTimer(
+          withTimeInterval: 0.12, repeats: true
+        ) { [weak self] _ in
+          self?.tickSpinner()
+        }
+      }
+    } else {
+      runningKeys.remove(key)
+      // 通常のタブ名に戻す。
+      if let w = window(forSessionKey: key), let base = tabBaseNames[w] {
+        w.tab.title = base
+      }
+      if runningKeys.isEmpty {
+        spinnerTimer?.invalidate()
+        spinnerTimer = nil
+      }
+    }
+  }
+
+  private func tickSpinner() {
+    spinnerFrame = (spinnerFrame + 1) % spinnerFrames.count
+    let frame = spinnerFrames[spinnerFrame]
+    for key in runningKeys {
+      if let w = window(forSessionKey: key), let base = tabBaseNames[w] {
+        w.tab.title = "\(frame) \(base)"
+      }
+    }
   }
 
   /// ウィンドウのタブバーが隠れていれば表示する（ドロップ先を常に見せる）。
@@ -204,7 +271,14 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
       return
     }
     sessionWindows.removeAll(where: { $0 == window })
-    sessionKeys.removeValue(forKey: window)
+    if let key = sessionKeys.removeValue(forKey: window) {
+      runningKeys.remove(key)
+      if runningKeys.isEmpty {
+        spinnerTimer?.invalidate()
+        spinnerTimer = nil
+      }
+    }
+    tabBaseNames.removeValue(forKey: window)
     // ウィンドウごとにエンジンを停止して SSH 接続等のリソースを解放する
     controller.engine.shutDownEngine()
   }

@@ -17,6 +17,26 @@ class MacWindowService {
   /// タブ分離をサポートするプラットフォームかどうか。
   static bool get isSupported => !kIsWeb && Platform.isMacOS;
 
+  /// セッションウィンドウのネイティブタブに Claude Code 稼働インジケータ
+  /// (スピナー) を出す/消す。各セッションウィンドウの Dart が自分の
+  /// claudeRunning を監視して呼ぶ。
+  static Future<void> setTabRunning({
+    required int connectionId,
+    required String tmuxSessionName,
+    required bool running,
+  }) async {
+    if (!isSupported) return;
+    try {
+      await _channel.invokeMethod<void>('setTabRunning', {
+        'connectionId': connectionId,
+        'tmuxSessionName': tmuxSessionName,
+        'running': running,
+      });
+    } catch (e) {
+      AppLogger.instance.log('[multi-window] setTabRunning failed: $e');
+    }
+  }
+
   /// 現在のウィンドウが属する OS ネイティブタブグループで、隣のタブへ移動する。
   /// [next] が true なら次のタブ、false なら前のタブ。
   ///

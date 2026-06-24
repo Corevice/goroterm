@@ -131,6 +131,16 @@ class TerminalConnectionNotifier
   /// 通知済みフラグ: 一度通知を送ったら、ユーザーがタブを確認するまで再通知しない
   bool _notificationSent = false;
 
+  /// 直近のアイドル基準以降に Claude Code が稼働していたか。
+  ///
+  /// 複数デバイスで同じ tmux セッションを共有していると、片方の画面サイズ
+  /// 変更で tmux が全クライアントに全画面再描画を送る。これは「大量出力 →
+  /// 静止」に見えるためコマンド完了通知が誤発火し、セッション数だけ通知が
+  /// 一気に届く。実際には何も完了していない（Claude は稼働していない）ので、
+  /// Claude が稼働→アイドルに遷移した場合だけ通知するよう、このフラグで
+  /// ゲートする。
+  bool _claudeSeenRunningSinceIdle = false;
+
   /// アプリのライフサイクル状態を更新する（TerminalScreen から呼ばれる）
   static void setAppInBackground(bool value) {
     _isAppInBackground = value;
@@ -146,6 +156,7 @@ class TerminalConnectionNotifier
   /// フォアグラウンドで蓄積された出力量がバックグラウンドの通知判定に使われないようにする。
   void resetIdleCounter() {
     _outputBytesSinceLastIdle = 0;
+    _claudeSeenRunningSinceIdle = false;
     _idleNotifyTimer?.cancel();
     _idleNotifyTimer = null;
   }
@@ -727,6 +738,11 @@ class TerminalConnectionNotifier
   @visibleForTesting
   void setNotificationSentForTesting(bool value) => _notificationSent = value;
 
+  /// テスト専用: _claudeSeenRunningSinceIdle フラグを直接セットする。
+  @visibleForTesting
+  void setClaudeSeenRunningForTesting(bool value) =>
+      _claudeSeenRunningSinceIdle = value;
+
   /// テスト専用: _outputBytesSinceLastIdle に [n] バイトを加算し
   /// _resetIdleNotifyTimer() を呼び出す。stdoutSubscription からの出力受信を模倣する。
   @visibleForTesting
@@ -809,6 +825,13 @@ class TerminalConnectionNotifier
           _outputBytesSinceLastIdle = 0;
           return;
         }
+        // リサイズ等の全画面再描画では Claude は稼働していない。実際に
+        // Claude が稼働→アイドルに遷移したときだけ「完了」として通知し、
+        // 共有セッションのリサイズ嵐による誤通知を防ぐ。
+        if (!_claudeSeenRunningSinceIdle) {
+          _outputBytesSinceLastIdle = 0;
+          return;
+        }
         final host = _config?.host ?? 'server';
         // セッションマネージャからタブ名を取得
         final sessions = ref.read(sessionManagerProvider).sessions;
@@ -824,6 +847,7 @@ class TerminalConnectionNotifier
         _notificationSent = true;
       }
       _outputBytesSinceLastIdle = 0;
+      _claudeSeenRunningSinceIdle = false;
     });
   }
 
@@ -893,6 +917,9 @@ class TerminalConnectionNotifier
         final terminal = state.terminal;
         if (terminal == null) return;
         final running = _isClaudeCodeRunning(terminal);
+        // 稼働を観測したらフラグを立てる。完了通知はこのフラグが立って
+        // いるときだけ送るため、リサイズ再描画（Claude 非稼働）では誤発火しない。
+        if (running) _claudeSeenRunningSinceIdle = true;
         if (running != state.claudeRunning) {
           state = state.copyWith(claudeRunning: running);
         }

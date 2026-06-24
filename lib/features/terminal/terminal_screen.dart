@@ -385,6 +385,23 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         ref.watch(terminalConnectionProvider(activeSession.sessionId));
     final l = AppLocalizations.of(context);
 
+    // macOS: このセッションウィンドウの Claude Code 稼働状態を、OS ネイティブ
+    // タブのスピナーへ反映する。tmux セッションのウィンドウだけが対象。
+    final activeTmuxName = activeSession.tmuxSessionName;
+    if (MacWindowService.isSupported && activeTmuxName != null) {
+      ref.listen(
+        terminalConnectionProvider(activeSession.sessionId)
+            .select((s) => s.claudeRunning),
+        (prev, next) {
+          MacWindowService.setTabRunning(
+            connectionId: activeSession.connectionId,
+            tmuxSessionName: activeTmuxName,
+            running: next,
+          );
+        },
+      );
+    }
+
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: Colors.black,
