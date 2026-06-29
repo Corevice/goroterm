@@ -1326,6 +1326,7 @@ class _TerminalTabContentState extends ConsumerState<_TerminalTabContent>
       username: conn.username,
       authMethod:
           conn.authMethod == 'key' ? AuthMethod.key : AuthMethod.password,
+      claudeSystemPromptPath: conn.claudeSystemPromptPath,
     );
 
     // ダウンロード用 Isolate のための接続情報を設定

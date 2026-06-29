@@ -52,6 +52,9 @@
   "loadFromFile": "ファイルから読み込む",
   "passphraseLabel": "パスフレーズ（任意）",
   "passphraseHint": "暗号化された鍵のパスフレーズ",
+  "claudeSystemPromptPathLabel": "Claude システムプロンプトファイル（任意）",
+  "claudeSystemPromptPathHint": "~/.claude/CLAUDE-FABLE-5",
+  "claudeSystemPromptPathHelp": "設定すると、このサーバで `claude` 実行時に --system-prompt-file をこのパスで自動付与します。空欄なら従来どおり素の claude です。",
   "failedToSave": "保存に失敗: {error}",
 
   "fontSizeIndicator": "フォントサイズ: {size}",

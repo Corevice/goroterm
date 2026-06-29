@@ -27,6 +27,7 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
   final _passwordController = TextEditingController();
   final _privateKeyController = TextEditingController();
   final _passphraseController = TextEditingController();
+  final _claudeSystemPromptPathController = TextEditingController();
   String _authMethod = 'password';
   bool _isLoading = false;
   bool _isEditing = false;
@@ -48,6 +49,8 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
       _hostController.text = conn.host;
       _portController.text = conn.port.toString();
       _usernameController.text = conn.username;
+      _claudeSystemPromptPathController.text =
+          conn.claudeSystemPromptPath ?? '';
       setState(() {
         _authMethod = conn.authMethod;
       });
@@ -79,6 +82,7 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
     _passwordController.dispose();
     _privateKeyController.dispose();
     _passphraseController.dispose();
+    _claudeSystemPromptPathController.dispose();
     super.dispose();
   }
 
@@ -235,6 +239,20 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
               ),
             ],
             const SizedBox(height: 24),
+            TextFormField(
+              controller: _claudeSystemPromptPathController,
+              decoration: InputDecoration(
+                labelText: l.claudeSystemPromptPathLabel,
+                hintText: l.claudeSystemPromptPathHint,
+                helperText: l.claudeSystemPromptPathHelp,
+                helperMaxLines: 3,
+                border: const OutlineInputBorder(),
+              ),
+              autocorrect: false,
+              enableSuggestions: false,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+            ),
+            const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: _isLoading ? null : _save,
               icon: _isLoading
@@ -262,6 +280,10 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
       final pem = _authMethod == 'key' ? _privateKeyController.text.trim() : null;
       final passphrase =
           _authMethod == 'key' ? _passphraseController.text : null;
+      // 空欄は「設定なし（従来どおり素の claude）」として null で保存する。
+      final claudeSysPromptRaw = _claudeSystemPromptPathController.text.trim();
+      final claudeSysPrompt =
+          claudeSysPromptRaw.isEmpty ? null : claudeSysPromptRaw;
 
       if (_isEditing) {
         await notifier.updateConnection(
@@ -274,6 +296,7 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
           password:
               _authMethod == 'password' ? _passwordController.text : null,
           privateKeyPem: pem,
+          claudeSystemPromptPath: claudeSysPrompt,
         );
         if (passphrase != null) {
           final secureStorage = ref.read(secureStorageProvider);
@@ -293,6 +316,7 @@ class _ConnectionEditScreenState extends ConsumerState<ConnectionEditScreen> {
           password:
               _authMethod == 'password' ? _passwordController.text : null,
           privateKeyPem: pem,
+          claudeSystemPromptPath: claudeSysPrompt,
         );
         if (passphrase != null && passphrase.isNotEmpty) {
           final secureStorage = ref.read(secureStorageProvider);

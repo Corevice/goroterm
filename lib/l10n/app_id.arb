@@ -52,6 +52,9 @@
   "loadFromFile": "Muat dari file",
   "passphraseLabel": "Frasa sandi (opsional)",
   "passphraseHint": "Frasa sandi untuk kunci terenkripsi",
+  "claudeSystemPromptPathLabel": "File system prompt Claude (opsional)",
+  "claudeSystemPromptPathHint": "~/.claude/CLAUDE-FABLE-5",
+  "claudeSystemPromptPathHelp": "Jika diisi, menjalankan `claude` di server ini otomatis menambahkan --system-prompt-file dengan path ini. Kosongkan untuk perintah claude biasa.",
   "failedToSave": "Gagal menyimpan: {error}",
 
   "fontSizeIndicator": "Ukuran font: {size}",

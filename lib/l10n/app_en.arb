@@ -57,6 +57,9 @@
   "loadFromFile": "Load from file",
   "passphraseLabel": "Passphrase (optional)",
   "passphraseHint": "Passphrase for encrypted key",
+  "claudeSystemPromptPathLabel": "Claude system prompt file (optional)",
+  "claudeSystemPromptPathHint": "~/.claude/CLAUDE-FABLE-5",
+  "claudeSystemPromptPathHelp": "When set, running `claude` on this server automatically adds --system-prompt-file with this path. Leave empty for the normal claude command.",
   "failedToSave": "Failed to save: {error}",
   "@failedToSave": { "placeholders": { "error": { "type": "String" } } },
 

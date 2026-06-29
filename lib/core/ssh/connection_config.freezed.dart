@@ -22,6 +22,7 @@ mixin _$ConnectionConfig {
   String get username;
   AuthMethod get authMethod;
   DateTime? get createdAt;
+  String? get claudeSystemPromptPath;
 
   /// Create a copy of ConnectionConfig
   /// with the given fields replaced by the non-null parameter values.
@@ -48,17 +49,19 @@ mixin _$ConnectionConfig {
             (identical(other.authMethod, authMethod) ||
                 other.authMethod == authMethod) &&
             (identical(other.createdAt, createdAt) ||
-                other.createdAt == createdAt));
+                other.createdAt == createdAt) &&
+            (identical(other.claudeSystemPromptPath, claudeSystemPromptPath) ||
+                other.claudeSystemPromptPath == claudeSystemPromptPath));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
   @override
-  int get hashCode => Object.hash(
-      runtimeType, id, label, host, port, username, authMethod, createdAt);
+  int get hashCode => Object.hash(runtimeType, id, label, host, port, username,
+      authMethod, createdAt, claudeSystemPromptPath);
 
   @override
   String toString() {
-    return 'ConnectionConfig(id: $id, label: $label, host: $host, port: $port, username: $username, authMethod: $authMethod, createdAt: $createdAt)';
+    return 'ConnectionConfig(id: $id, label: $label, host: $host, port: $port, username: $username, authMethod: $authMethod, createdAt: $createdAt, claudeSystemPromptPath: $claudeSystemPromptPath)';
   }
 }
 
@@ -75,7 +78,8 @@ abstract mixin class $ConnectionConfigCopyWith<$Res> {
       int port,
       String username,
       AuthMethod authMethod,
-      DateTime? createdAt});
+      DateTime? createdAt,
+      String? claudeSystemPromptPath});
 }
 
 /// @nodoc
@@ -98,6 +102,7 @@ class _$ConnectionConfigCopyWithImpl<$Res>
     Object? username = null,
     Object? authMethod = null,
     Object? createdAt = freezed,
+    Object? claudeSystemPromptPath = freezed,
   }) {
     return _then(_self.copyWith(
       id: freezed == id
@@ -128,6 +133,10 @@ class _$ConnectionConfigCopyWithImpl<$Res>
           ? _self.createdAt
           : createdAt // ignore: cast_nullable_to_non_nullable
               as DateTime?,
+      claudeSystemPromptPath: freezed == claudeSystemPromptPath
+          ? _self.claudeSystemPromptPath
+          : claudeSystemPromptPath // ignore: cast_nullable_to_non_nullable
+              as String?,
     ));
   }
 }
@@ -142,7 +151,8 @@ class _ConnectionConfig implements ConnectionConfig {
       this.port = 22,
       required this.username,
       this.authMethod = AuthMethod.password,
-      this.createdAt});
+      this.createdAt,
+      this.claudeSystemPromptPath});
   factory _ConnectionConfig.fromJson(Map<String, dynamic> json) =>
       _$ConnectionConfigFromJson(json);
 
@@ -162,6 +172,8 @@ class _ConnectionConfig implements ConnectionConfig {
   final AuthMethod authMethod;
   @override
   final DateTime? createdAt;
+  @override
+  final String? claudeSystemPromptPath;
 
   /// Create a copy of ConnectionConfig
   /// with the given fields replaced by the non-null parameter values.
@@ -192,17 +204,19 @@ class _ConnectionConfig implements ConnectionConfig {
             (identical(other.authMethod, authMethod) ||
                 other.authMethod == authMethod) &&
             (identical(other.createdAt, createdAt) ||
-                other.createdAt == createdAt));
+                other.createdAt == createdAt) &&
+            (identical(other.claudeSystemPromptPath, claudeSystemPromptPath) ||
+                other.claudeSystemPromptPath == claudeSystemPromptPath));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
   @override
-  int get hashCode => Object.hash(
-      runtimeType, id, label, host, port, username, authMethod, createdAt);
+  int get hashCode => Object.hash(runtimeType, id, label, host, port, username,
+      authMethod, createdAt, claudeSystemPromptPath);
 
   @override
   String toString() {
-    return 'ConnectionConfig(id: $id, label: $label, host: $host, port: $port, username: $username, authMethod: $authMethod, createdAt: $createdAt)';
+    return 'ConnectionConfig(id: $id, label: $label, host: $host, port: $port, username: $username, authMethod: $authMethod, createdAt: $createdAt, claudeSystemPromptPath: $claudeSystemPromptPath)';
   }
 }
 
@@ -221,7 +235,8 @@ abstract mixin class _$ConnectionConfigCopyWith<$Res>
       int port,
       String username,
       AuthMethod authMethod,
-      DateTime? createdAt});
+      DateTime? createdAt,
+      String? claudeSystemPromptPath});
 }
 
 /// @nodoc
@@ -244,6 +259,7 @@ class __$ConnectionConfigCopyWithImpl<$Res>
     Object? username = null,
     Object? authMethod = null,
     Object? createdAt = freezed,
+    Object? claudeSystemPromptPath = freezed,
   }) {
     return _then(_ConnectionConfig(
       id: freezed == id
@@ -274,6 +290,10 @@ class __$ConnectionConfigCopyWithImpl<$Res>
           ? _self.createdAt
           : createdAt // ignore: cast_nullable_to_non_nullable
               as DateTime?,
+      claudeSystemPromptPath: freezed == claudeSystemPromptPath
+          ? _self.claudeSystemPromptPath
+          : claudeSystemPromptPath // ignore: cast_nullable_to_non_nullable
+              as String?,
     ));
   }
 }

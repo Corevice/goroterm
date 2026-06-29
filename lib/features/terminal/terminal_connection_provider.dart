@@ -14,6 +14,7 @@ import '../../core/notification/notification_service.dart';
 import '../../core/ssh/connection_config.dart';
 import '../../core/ssh/ssh_client_service.dart';
 import '../../core/utils/app_logger.dart';
+import '../../core/utils/claude_rc_setup.dart';
 import '../../core/utils/streaming_utf8_decoder.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/ssh/known_hosts_store.dart';
@@ -903,6 +904,29 @@ class TerminalConnectionNotifier
       shellExited: false,
     );
     _startClaudeDetectTimer();
+    _applyClaudeRcSetup();
+  }
+
+  /// 接続ごとの「Claude システムプロンプトファイル」設定をサーバの rc に反映する。
+  /// exec チャネルで実行するため PTY（実行中の claude 等）には影響しない。
+  /// fire-and-forget: 失敗しても接続には影響させない。
+  ///
+  /// 設定ありなら管理ブロックを更新、未設定なら既存の管理ブロックを除去する
+  /// （= 設定を空にしたら素の claude に戻る）。未設定かつブロックも無い接続では
+  /// grep の読み取りのみで rc は書き換えない。
+  void _applyClaudeRcSetup() {
+    final channelManager = _channelManager;
+    if (channelManager == null) return;
+    // fire-and-forget: 同期・非同期どちらの失敗も接続処理に波及させない。
+    try {
+      final cmd = buildClaudeRcSetupCommand(_config?.claudeSystemPromptPath);
+      channelManager.runCommand(cmd).catchError((Object e) {
+        AppLogger.instance.log('[SSH][$arg] claude rc setup failed: $e');
+        return Uint8List(0);
+      });
+    } catch (e) {
+      AppLogger.instance.log('[SSH][$arg] claude rc setup error: $e');
+    }
   }
 
   /// Claude Code 稼働状態を周期的に検出するタイマー。

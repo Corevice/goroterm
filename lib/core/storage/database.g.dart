@@ -57,9 +57,23 @@ class $ConnectionsTable extends Connections
       type: DriftSqlType.dateTime,
       requiredDuringInsert: false,
       defaultValue: currentDateAndTime);
+  static const VerificationMeta _claudeSystemPromptPathMeta =
+      const VerificationMeta('claudeSystemPromptPath');
   @override
-  List<GeneratedColumn> get $columns =>
-      [id, label, host, port, username, authMethod, createdAt];
+  late final GeneratedColumn<String> claudeSystemPromptPath =
+      GeneratedColumn<String>('claude_system_prompt_path', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
+  @override
+  List<GeneratedColumn> get $columns => [
+        id,
+        label,
+        host,
+        port,
+        username,
+        authMethod,
+        createdAt,
+        claudeSystemPromptPath
+      ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -105,6 +119,12 @@ class $ConnectionsTable extends Connections
       context.handle(_createdAtMeta,
           createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
     }
+    if (data.containsKey('claude_system_prompt_path')) {
+      context.handle(
+          _claudeSystemPromptPathMeta,
+          claudeSystemPromptPath.isAcceptableOrUnknown(
+              data['claude_system_prompt_path']!, _claudeSystemPromptPathMeta));
+    }
     return context;
   }
 
@@ -128,6 +148,9 @@ class $ConnectionsTable extends Connections
           .read(DriftSqlType.string, data['${effectivePrefix}auth_method'])!,
       createdAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      claudeSystemPromptPath: attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}claude_system_prompt_path']),
     );
   }
 
@@ -145,6 +168,11 @@ class Connection extends DataClass implements Insertable<Connection> {
   final String username;
   final String authMethod;
   final DateTime createdAt;
+
+  /// 任意: 設定すると、この接続で `claude` 実行時に
+  /// `--system-prompt-file <path>` を自動付与するシェル関数を
+  /// サーバの rc に登録する。空/未設定なら従来どおり素の `claude`。
+  final String? claudeSystemPromptPath;
   const Connection(
       {required this.id,
       required this.label,
@@ -152,7 +180,8 @@ class Connection extends DataClass implements Insertable<Connection> {
       required this.port,
       required this.username,
       required this.authMethod,
-      required this.createdAt});
+      required this.createdAt,
+      this.claudeSystemPromptPath});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -163,6 +192,10 @@ class Connection extends DataClass implements Insertable<Connection> {
     map['username'] = Variable<String>(username);
     map['auth_method'] = Variable<String>(authMethod);
     map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || claudeSystemPromptPath != null) {
+      map['claude_system_prompt_path'] =
+          Variable<String>(claudeSystemPromptPath);
+    }
     return map;
   }
 
@@ -175,6 +208,9 @@ class Connection extends DataClass implements Insertable<Connection> {
       username: Value(username),
       authMethod: Value(authMethod),
       createdAt: Value(createdAt),
+      claudeSystemPromptPath: claudeSystemPromptPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(claudeSystemPromptPath),
     );
   }
 
@@ -189,6 +225,8 @@ class Connection extends DataClass implements Insertable<Connection> {
       username: serializer.fromJson<String>(json['username']),
       authMethod: serializer.fromJson<String>(json['authMethod']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      claudeSystemPromptPath:
+          serializer.fromJson<String?>(json['claudeSystemPromptPath']),
     );
   }
   @override
@@ -202,6 +240,8 @@ class Connection extends DataClass implements Insertable<Connection> {
       'username': serializer.toJson<String>(username),
       'authMethod': serializer.toJson<String>(authMethod),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'claudeSystemPromptPath':
+          serializer.toJson<String?>(claudeSystemPromptPath),
     };
   }
 
@@ -212,7 +252,8 @@ class Connection extends DataClass implements Insertable<Connection> {
           int? port,
           String? username,
           String? authMethod,
-          DateTime? createdAt}) =>
+          DateTime? createdAt,
+          Value<String?> claudeSystemPromptPath = const Value.absent()}) =>
       Connection(
         id: id ?? this.id,
         label: label ?? this.label,
@@ -221,6 +262,9 @@ class Connection extends DataClass implements Insertable<Connection> {
         username: username ?? this.username,
         authMethod: authMethod ?? this.authMethod,
         createdAt: createdAt ?? this.createdAt,
+        claudeSystemPromptPath: claudeSystemPromptPath.present
+            ? claudeSystemPromptPath.value
+            : this.claudeSystemPromptPath,
       );
   Connection copyWithCompanion(ConnectionsCompanion data) {
     return Connection(
@@ -232,6 +276,9 @@ class Connection extends DataClass implements Insertable<Connection> {
       authMethod:
           data.authMethod.present ? data.authMethod.value : this.authMethod,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      claudeSystemPromptPath: data.claudeSystemPromptPath.present
+          ? data.claudeSystemPromptPath.value
+          : this.claudeSystemPromptPath,
     );
   }
 
@@ -244,14 +291,15 @@ class Connection extends DataClass implements Insertable<Connection> {
           ..write('port: $port, ')
           ..write('username: $username, ')
           ..write('authMethod: $authMethod, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('claudeSystemPromptPath: $claudeSystemPromptPath')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, label, host, port, username, authMethod, createdAt);
+  int get hashCode => Object.hash(id, label, host, port, username, authMethod,
+      createdAt, claudeSystemPromptPath);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -262,7 +310,8 @@ class Connection extends DataClass implements Insertable<Connection> {
           other.port == this.port &&
           other.username == this.username &&
           other.authMethod == this.authMethod &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.claudeSystemPromptPath == this.claudeSystemPromptPath);
 }
 
 class ConnectionsCompanion extends UpdateCompanion<Connection> {
@@ -273,6 +322,7 @@ class ConnectionsCompanion extends UpdateCompanion<Connection> {
   final Value<String> username;
   final Value<String> authMethod;
   final Value<DateTime> createdAt;
+  final Value<String?> claudeSystemPromptPath;
   const ConnectionsCompanion({
     this.id = const Value.absent(),
     this.label = const Value.absent(),
@@ -281,6 +331,7 @@ class ConnectionsCompanion extends UpdateCompanion<Connection> {
     this.username = const Value.absent(),
     this.authMethod = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.claudeSystemPromptPath = const Value.absent(),
   });
   ConnectionsCompanion.insert({
     this.id = const Value.absent(),
@@ -290,6 +341,7 @@ class ConnectionsCompanion extends UpdateCompanion<Connection> {
     required String username,
     this.authMethod = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.claudeSystemPromptPath = const Value.absent(),
   })  : label = Value(label),
         host = Value(host),
         username = Value(username);
@@ -301,6 +353,7 @@ class ConnectionsCompanion extends UpdateCompanion<Connection> {
     Expression<String>? username,
     Expression<String>? authMethod,
     Expression<DateTime>? createdAt,
+    Expression<String>? claudeSystemPromptPath,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -310,6 +363,8 @@ class ConnectionsCompanion extends UpdateCompanion<Connection> {
       if (username != null) 'username': username,
       if (authMethod != null) 'auth_method': authMethod,
       if (createdAt != null) 'created_at': createdAt,
+      if (claudeSystemPromptPath != null)
+        'claude_system_prompt_path': claudeSystemPromptPath,
     });
   }
 
@@ -320,7 +375,8 @@ class ConnectionsCompanion extends UpdateCompanion<Connection> {
       Value<int>? port,
       Value<String>? username,
       Value<String>? authMethod,
-      Value<DateTime>? createdAt}) {
+      Value<DateTime>? createdAt,
+      Value<String?>? claudeSystemPromptPath}) {
     return ConnectionsCompanion(
       id: id ?? this.id,
       label: label ?? this.label,
@@ -329,6 +385,8 @@ class ConnectionsCompanion extends UpdateCompanion<Connection> {
       username: username ?? this.username,
       authMethod: authMethod ?? this.authMethod,
       createdAt: createdAt ?? this.createdAt,
+      claudeSystemPromptPath:
+          claudeSystemPromptPath ?? this.claudeSystemPromptPath,
     );
   }
 
@@ -356,6 +414,10 @@ class ConnectionsCompanion extends UpdateCompanion<Connection> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (claudeSystemPromptPath.present) {
+      map['claude_system_prompt_path'] =
+          Variable<String>(claudeSystemPromptPath.value);
+    }
     return map;
   }
 
@@ -368,7 +430,8 @@ class ConnectionsCompanion extends UpdateCompanion<Connection> {
           ..write('port: $port, ')
           ..write('username: $username, ')
           ..write('authMethod: $authMethod, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('claudeSystemPromptPath: $claudeSystemPromptPath')
           ..write(')'))
         .toString();
   }
@@ -862,6 +925,7 @@ typedef $$ConnectionsTableCreateCompanionBuilder = ConnectionsCompanion
   required String username,
   Value<String> authMethod,
   Value<DateTime> createdAt,
+  Value<String?> claudeSystemPromptPath,
 });
 typedef $$ConnectionsTableUpdateCompanionBuilder = ConnectionsCompanion
     Function({
@@ -872,6 +936,7 @@ typedef $$ConnectionsTableUpdateCompanionBuilder = ConnectionsCompanion
   Value<String> username,
   Value<String> authMethod,
   Value<DateTime> createdAt,
+  Value<String?> claudeSystemPromptPath,
 });
 
 final class $$ConnectionsTableReferences
@@ -924,6 +989,10 @@ class $$ConnectionsTableFilterComposer
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<String> get claudeSystemPromptPath => $composableBuilder(
+      column: $table.claudeSystemPromptPath,
+      builder: (column) => ColumnFilters(column));
+
   Expression<bool> portTunnelsRefs(
       Expression<bool> Function($$PortTunnelsTableFilterComposer f) f) {
     final $$PortTunnelsTableFilterComposer composer = $composerBuilder(
@@ -975,6 +1044,10 @@ class $$ConnectionsTableOrderingComposer
 
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get claudeSystemPromptPath => $composableBuilder(
+      column: $table.claudeSystemPromptPath,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$ConnectionsTableAnnotationComposer
@@ -1006,6 +1079,9 @@ class $$ConnectionsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get claudeSystemPromptPath => $composableBuilder(
+      column: $table.claudeSystemPromptPath, builder: (column) => column);
 
   Expression<T> portTunnelsRefs<T extends Object>(
       Expression<T> Function($$PortTunnelsTableAnnotationComposer a) f) {
@@ -1059,6 +1135,7 @@ class $$ConnectionsTableTableManager extends RootTableManager<
             Value<String> username = const Value.absent(),
             Value<String> authMethod = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
+            Value<String?> claudeSystemPromptPath = const Value.absent(),
           }) =>
               ConnectionsCompanion(
             id: id,
@@ -1068,6 +1145,7 @@ class $$ConnectionsTableTableManager extends RootTableManager<
             username: username,
             authMethod: authMethod,
             createdAt: createdAt,
+            claudeSystemPromptPath: claudeSystemPromptPath,
           ),
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
@@ -1077,6 +1155,7 @@ class $$ConnectionsTableTableManager extends RootTableManager<
             required String username,
             Value<String> authMethod = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
+            Value<String?> claudeSystemPromptPath = const Value.absent(),
           }) =>
               ConnectionsCompanion.insert(
             id: id,
@@ -1086,6 +1165,7 @@ class $$ConnectionsTableTableManager extends RootTableManager<
             username: username,
             authMethod: authMethod,
             createdAt: createdAt,
+            claudeSystemPromptPath: claudeSystemPromptPath,
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (

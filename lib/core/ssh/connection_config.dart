@@ -18,6 +18,7 @@ abstract class ConnectionConfig with _$ConnectionConfig {
     required String username,
     @Default(AuthMethod.password) AuthMethod authMethod,
     DateTime? createdAt,
+    String? claudeSystemPromptPath,
   }) = _ConnectionConfig;
 
   factory ConnectionConfig.fromJson(Map<String, dynamic> json) =>

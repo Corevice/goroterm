@@ -39,6 +39,7 @@ class ConnectionListNotifier extends AsyncNotifier<List<Connection>> {
     required String authMethod,
     String? password,
     String? privateKeyPem,
+    String? claudeSystemPromptPath,
   }) async {
     final repo = ref.read(connectionRepositoryProvider);
     final id = await repo.add(ConnectionsCompanion.insert(
@@ -47,6 +48,7 @@ class ConnectionListNotifier extends AsyncNotifier<List<Connection>> {
       port: Value(port),
       username: username,
       authMethod: Value(authMethod),
+      claudeSystemPromptPath: Value(claudeSystemPromptPath),
     ));
 
     await _saveCredentials(id, password, privateKeyPem);
@@ -62,6 +64,7 @@ class ConnectionListNotifier extends AsyncNotifier<List<Connection>> {
     required String authMethod,
     String? password,
     String? privateKeyPem,
+    String? claudeSystemPromptPath,
   }) async {
     final repo = ref.read(connectionRepositoryProvider);
     await repo.update(
@@ -72,6 +75,7 @@ class ConnectionListNotifier extends AsyncNotifier<List<Connection>> {
         port: Value(port),
         username: Value(username),
         authMethod: Value(authMethod),
+        claudeSystemPromptPath: Value(claudeSystemPromptPath),
       ),
     );
 

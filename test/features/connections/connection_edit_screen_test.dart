@@ -31,6 +31,7 @@ class _FakeConnectionListNotifier extends ConnectionListNotifier {
     required String authMethod,
     String? password,
     String? privateKeyPem,
+    String? claudeSystemPromptPath,
   }) async =>
       99;
 
@@ -44,6 +45,7 @@ class _FakeConnectionListNotifier extends ConnectionListNotifier {
     required String authMethod,
     String? password,
     String? privateKeyPem,
+    String? claudeSystemPromptPath,
   }) async {}
 }
 
@@ -79,6 +81,21 @@ Widget _buildEdit({
 // ---------------------------------------------------------------------------
 
 void main() {
+  // フォームは ListView。フィールドが増えてもボタン等が遅延生成で
+  // ビューポート外にならないよう、テスト画面を縦長にして全項目を構築させる。
+  setUp(() {
+    final view = TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+        .views.first;
+    view.physicalSize = const Size(1000, 3000);
+    view.devicePixelRatio = 1.0;
+  });
+  tearDown(() {
+    final view = TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+        .views.first;
+    view.resetPhysicalSize();
+    view.resetDevicePixelRatio();
+  });
+
   group('ConnectionEditScreen - new connection', () {
     testWidgets('shows "New Connection" title', (tester) async {
       await tester.pumpWidget(_buildNew());

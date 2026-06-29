@@ -19,6 +19,7 @@ _ConnectionConfig _$ConnectionConfigFromJson(Map<String, dynamic> json) =>
       createdAt: json['createdAt'] == null
           ? null
           : DateTime.parse(json['createdAt'] as String),
+      claudeSystemPromptPath: json['claudeSystemPromptPath'] as String?,
     );
 
 Map<String, dynamic> _$ConnectionConfigToJson(_ConnectionConfig instance) =>
@@ -30,6 +31,7 @@ Map<String, dynamic> _$ConnectionConfigToJson(_ConnectionConfig instance) =>
       'username': instance.username,
       'authMethod': _$AuthMethodEnumMap[instance.authMethod]!,
       'createdAt': instance.createdAt?.toIso8601String(),
+      'claudeSystemPromptPath': instance.claudeSystemPromptPath,
     };
 
 const _$AuthMethodEnumMap = {
