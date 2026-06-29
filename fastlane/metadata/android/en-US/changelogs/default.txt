@@ -1,2 +1,1 @@
-• Fixed: a screen-size change on one device no longer triggers a flood of false completion notifications when the same session is open on another device.
-• Improved (macOS): hover a tab to see its full name, and the Claude Code working indicator is back on tabs.
+• New: set a "Claude system prompt file" per connection. On that server, running claude automatically adds --system-prompt-file (whether typed or via the button). Leave empty for the normal claude command.
