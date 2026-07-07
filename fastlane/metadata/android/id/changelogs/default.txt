@@ -1,1 +1,1 @@
-• Peningkatan: notifikasi selesai menampilkan lebih banyak output Claude, dan membuka satu notifikasi tidak lagi menghapus yang lain.
+• Peningkatan: notifikasi selesai kini juga muncul saat aplikasi terbuka (kecuali sesi yang sedang Anda lihat), jadi Anda tahu Claude selesai di tab lain.

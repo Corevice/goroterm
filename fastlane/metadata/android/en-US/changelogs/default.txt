@@ -1,1 +1,1 @@
-• Improved: the completion notification shows more of Claude's output, and opening one notification no longer dismisses the others.
+• Improved: completion notifications now fire while the app is open too (except for the session you're currently viewing), so you notice Claude finishing in other tabs.
