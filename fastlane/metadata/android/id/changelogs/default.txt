@@ -1,1 +1,1 @@
-• Baru: balas langsung dari notifikasi selesai Claude Code untuk mengirim instruksi berikutnya ke sesi itu (saat aplikasi/sesi berjalan).
+• Peningkatan: notifikasi selesai kini menampilkan pratinjau output terakhir Claude, jadi Anda tahu apa yang terjadi dan bisa langsung membalas.

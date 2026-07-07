@@ -1,1 +1,1 @@
-• New: reply straight from the Claude Code completion notification to send the next instruction to that session (while the app/session is running).
+• Improved: the completion notification now shows a preview of Claude's last output, so you can see what happened and reply with the next instruction.
