@@ -67,6 +67,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     WidgetsBinding.instance.removeObserver(this);
+    // ターミナル画面を離れたら「表示中セッション」なし（接続一覧に戻る等）。
+    TerminalConnectionNotifier.setVisibleSession(null);
     _drawerClosedNotifier.dispose();
     super.dispose();
   }
@@ -252,6 +254,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
       TerminalConnectionNotifier.setAppInBackground(true);
+      // バックグラウンドでは「表示中セッション」なし → 全セッションの完了で通知。
+      TerminalConnectionNotifier.setVisibleSession(null);
       // フォアグラウンドで蓄積されたバイトカウントをリセット
       final sessions = ref.read(sessionManagerProvider).sessions;
       for (final session in sessions) {
@@ -376,6 +380,10 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     final activeIdx =
         sessions.indexWhere((s) => s.sessionId == activeId).clamp(0, sessions.length - 1);
     final activeSession = sessions[activeIdx];
+
+    // 表示中セッションを記録する。フォアグラウンドでも通知を出すが、
+    // 今まさに見ているこのセッションの完了だけは通知を抑制するため。
+    TerminalConnectionNotifier.setVisibleSession(activeSession.sessionId);
 
     final activeConnectionState =
         ref.watch(terminalConnectionProvider(activeSession.sessionId));

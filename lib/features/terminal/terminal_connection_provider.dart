@@ -132,6 +132,17 @@ class TerminalConnectionNotifier
   static const int _idleNotifyThresholdBytes = 4096; // tmuxステータス更新を除外するため十分大きく
   static const Duration _idleNotifyDelay = Duration(seconds: 30);
   static bool _isAppInBackground = false;
+
+  /// 現在フォアグラウンドで「表示中」のセッション ID（ターミナル画面の
+  /// アクティブタブ）。フォアグラウンドでも通知を出す一方、まさに見ている
+  /// セッションの完了だけは冗長なので通知を抑制するために使う。
+  static String? _visibleSessionId;
+
+  /// 表示中セッションを設定する（TerminalScreen から呼ばれる）。
+  static void setVisibleSession(String? sessionId) {
+    _visibleSessionId = sessionId;
+  }
+
   /// 通知済みフラグ: 一度通知を送ったら、ユーザーがタブを確認するまで再通知しない
   bool _notificationSent = false;
 
@@ -847,16 +858,22 @@ class TerminalConnectionNotifier
 
   void _resetIdleNotifyTimer() {
     _idleNotifyTimer?.cancel();
-    // フォアグラウンド時はタイマーを設定しない（バイトカウントのみ蓄積）
-    if (!_isAppInBackground) return;
+    // フォアグラウンドでも通知する（別タブで完了した Claude に気付けるように）。
+    // ただし「今表示しているセッション」の完了だけは冗長なので後段で抑制する。
     if (_notificationSent) return;
     if (_outputBytesSinceLastIdle < _idleNotifyThresholdBytes) return;
 
     _idleNotifyTimer = Timer(_idleNotifyDelay, () {
       _idleNotifyTimer = null;
-      if (_isAppInBackground &&
-          !_notificationSent &&
+      if (!_notificationSent &&
           _outputBytesSinceLastIdle >= _idleNotifyThresholdBytes) {
+        // フォアグラウンドで、今まさに表示しているセッションの完了は
+        // 画面で見えているので通知しない。
+        if (!_isAppInBackground && _visibleSessionId == arg) {
+          _outputBytesSinceLastIdle = 0;
+          _claudeSeenRunningSinceIdle = false;
+          return;
+        }
         // Claude Code がまだ稼働中（"esc to interrupt" や spinner status が
         // ターミナルバッファに見えている）なら通知をスキップ。
         // 次の出力で再びタイマーがアームされ、改めて判定される。

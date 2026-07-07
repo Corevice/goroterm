@@ -1606,8 +1606,9 @@ void main() {
 
     tearDown(() {
       container.dispose();
-      // Reset static flag to avoid polluting other test groups.
+      // Reset static flags to avoid polluting other test groups.
       TerminalConnectionNotifier.setAppInBackground(false);
+      TerminalConnectionNotifier.setVisibleSession(null);
     });
 
     test('setAppInBackground(true) sets the flag to true', () {
@@ -1765,35 +1766,41 @@ void main() {
       });
     });
 
-    test('no idle timer when app is in foreground (!_isAppInBackground)', () {
-      // フォアグラウンドガード: バイト数が閾値以上でもタイマーを作らない。
-      // バイトカウントだけ蓄積されるが、バックグラウンド移行まで通知しない。
+    test('idle timer arms in foreground too (notify while app is open)', () {
+      // 仕様変更: フォアグラウンドでもタイマーを張り、通知する（別タブで完了
+      // した Claude に気付けるように）。表示中セッションの抑制は発火時に行う。
       TerminalConnectionNotifier.setAppInBackground(false);
       notifier.addOutputBytesForTesting(4096);
       expect(
         notifier.isIdleTimerActiveForTesting,
-        isFalse,
-        reason: 'foreground guard must prevent idle timer even above threshold',
+        isTrue,
+        reason: 'foreground must also arm the idle timer',
       );
     });
 
-    test('idle timer created after transitioning foreground → background', () {
-      // フォアグラウンドで蓄積したバイトカウントは保持される。
-      // バックグラウンドに移行してから次の出力受信時にタイマーが作成される。
-      TerminalConnectionNotifier.setAppInBackground(false);
-      notifier.addOutputBytesForTesting(4096); // 閾値以上 — タイマー不作成
-      expect(notifier.isIdleTimerActiveForTesting, isFalse,
-          reason: 'foreground: no timer despite bytes >= threshold');
+    test('foreground: notifies for a session that is not on screen', () {
+      fakeAsync((async) {
+        TerminalConnectionNotifier.setAppInBackground(false);
+        TerminalConnectionNotifier.setVisibleSession('some-other-session');
+        notifier.setClaudeSeenRunningForTesting(true);
+        notifier.addOutputBytesForTesting(4096);
+        async.elapse(const Duration(seconds: 30));
+        expect(notifier.isNotificationSentForTesting, isTrue,
+            reason: 'a non-visible session must notify even in foreground');
+      });
+    });
 
-      TerminalConnectionNotifier.setAppInBackground(true);
-      // バックグラウンド移行後、次の出力受信でタイマーが作成される。
-      notifier.addOutputBytesForTesting(1); // _resetIdleNotifyTimer() を再呼び出し
-      expect(
-        notifier.isIdleTimerActiveForTesting,
-        isTrue,
-        reason:
-            'after transitioning to background, new output must arm the timer',
-      );
+    test('foreground: suppresses notification for the on-screen session', () {
+      fakeAsync((async) {
+        TerminalConnectionNotifier.setAppInBackground(false);
+        // 'idle-test' はこの group の notifier のセッション ID（表示中）。
+        TerminalConnectionNotifier.setVisibleSession('idle-test');
+        notifier.setClaudeSeenRunningForTesting(true);
+        notifier.addOutputBytesForTesting(4096);
+        async.elapse(const Duration(seconds: 30));
+        expect(notifier.isNotificationSentForTesting, isFalse,
+            reason: 'the session currently on screen must not notify itself');
+      });
     });
 
     // -------------------------------------------------------------------------
