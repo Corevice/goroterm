@@ -10,6 +10,7 @@ import 'core/theme/theme_provider.dart';
 import 'features/connections/connection_list_screen.dart';
 import 'features/connections/connection_edit_screen.dart';
 import 'features/terminal/session_manager.dart';
+import 'features/terminal/terminal_connection_provider.dart';
 import 'features/terminal/terminal_screen.dart';
 import 'features/settings/settings_screen.dart';
 
@@ -42,6 +43,17 @@ class _TerminalSshAppState extends ConsumerState<TerminalSshApp> {
       );
     };
 
+    // 通知のインライン返信 → 対象セッションの tmux に次の指示を send-keys で送る。
+    // アプリ/接続が生きている間に有効（Android は foreground service で維持）。
+    NotificationService.instance.onReplySession = (sessionId, text) {
+      if (!mounted) return;
+      ref
+          .read(terminalConnectionProvider(sessionId).notifier)
+          .sendTmuxInstruction(text);
+      // RemoteInput のスピナーを片付けるため通知を消す。
+      NotificationService.instance.cancelForSession(sessionId);
+    };
+
     // タブ分離ウィンドウ: 起動引数のセッションをタブとして開き、
     // 接続一覧を経由せず直接ターミナル画面へ遷移する。
     final detached = widget.detachedSession;
@@ -63,6 +75,7 @@ class _TerminalSshAppState extends ConsumerState<TerminalSshApp> {
   @override
   void dispose() {
     NotificationService.instance.onSelectSession = null;
+    NotificationService.instance.onReplySession = null;
     super.dispose();
   }
 

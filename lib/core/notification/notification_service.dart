@@ -8,6 +8,10 @@ const _kCommandFinishedChannelName = 'Command Finished';
 const _kCommandFinishedChannelDescription =
     'Notifies when a long-running command completes';
 
+/// 通知内インライン返信アクション/カテゴリの ID（両プラットフォーム共通）。
+const _kReplyActionId = 'reply';
+const _kReplyCategoryId = 'claude_reply';
+
 class NotificationService {
   NotificationService._();
   static final NotificationService instance = NotificationService._();
@@ -20,16 +24,36 @@ class NotificationService {
   /// from the widget layer so we can route through Riverpod / Navigator.
   void Function(String sessionId)? onSelectSession;
 
+  /// 通知のインライン返信で送信されたときに呼ばれる。[text] はユーザーが
+  /// 入力した次の指示。ウィジェット層から設定し、対象セッションの tmux へ
+  /// 送信する。
+  void Function(String sessionId, String text)? onReplySession;
+
   Future<void> init() async {
     if (_initialized) return;
 
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     // 起動時に通知許可ダイアログを出す (iOS / macOS)。
     // Android 13+ の POST_NOTIFICATIONS は init 後に Android 専用 API で要求する。
-    const darwinSettings = DarwinInitializationSettings(
+    final darwinSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: false,
       requestSoundPermission: true,
+      // 通知からのインライン返信（Claude への次の指示）用カテゴリ。
+      notificationCategories: [
+        DarwinNotificationCategory(
+          _kReplyCategoryId,
+          actions: [
+            DarwinNotificationAction.text(
+              _kReplyActionId,
+              'Reply',
+              buttonTitle: 'Send',
+              placeholder: 'Message to Claude…',
+            ),
+          ],
+          options: {DarwinNotificationCategoryOption.allowInCarPlay},
+        ),
+      ],
     );
     const linuxSettings =
         LinuxInitializationSettings(defaultActionName: 'Open');
@@ -39,7 +63,7 @@ class NotificationService {
       // GUID は通知 activation コールバックの登録に使われる。生成後は変えない。
       guid: '2c2cca97-fc04-4cf9-9c39-5fd99c10d4a8',
     );
-    const settings = InitializationSettings(
+    final settings = InitializationSettings(
       android: androidSettings,
       iOS: darwinSettings,
       macOS: darwinSettings,
@@ -81,6 +105,12 @@ class NotificationService {
   void _handleResponse(NotificationResponse response) {
     final payload = response.payload;
     if (payload == null || payload.isEmpty) return;
+    // インライン返信: 入力テキストを対象セッションへ送信する。
+    if (response.actionId == _kReplyActionId) {
+      final text = response.input?.trim() ?? '';
+      if (text.isNotEmpty) onReplySession?.call(payload, text);
+      return;
+    }
     onSelectSession?.call(payload);
   }
 
@@ -93,8 +123,27 @@ class NotificationService {
     required String sessionId,
     required String title,
     required String body,
+    String? replyLabel,
+    String? replyHint,
   }) async {
     if (!_initialized) return;
+
+    // インライン返信アクション（次の指示を Claude に送る）。
+    // replyLabel が指定されたときだけ付与する。
+    final androidActions = replyLabel == null
+        ? null
+        : <AndroidNotificationAction>[
+            AndroidNotificationAction(
+              _kReplyActionId,
+              replyLabel,
+              inputs: <AndroidNotificationActionInput>[
+                AndroidNotificationActionInput(label: replyHint ?? replyLabel),
+              ],
+              allowGeneratedReplies: false,
+              // 返信後は通知を消す（送信済みとして片付ける）。
+              cancelNotification: true,
+            ),
+          ];
 
     // groupKey に sessionId を入れて iOS の threadIdentifier と同様に
     // セッション単位で通知センターでまとめる。
@@ -105,6 +154,7 @@ class NotificationService {
       importance: Importance.high,
       priority: Priority.high,
       groupKey: sessionId,
+      actions: androidActions,
     );
     final iosDetails = DarwinNotificationDetails(
       presentBanner: true,
@@ -112,6 +162,7 @@ class NotificationService {
       presentSound: true,
       interruptionLevel: InterruptionLevel.active,
       threadIdentifier: sessionId,
+      categoryIdentifier: replyLabel == null ? null : _kReplyCategoryId,
     );
     final details = NotificationDetails(
       android: androidDetails,

@@ -16,6 +16,7 @@ import '../../core/ssh/ssh_client_service.dart';
 import '../../core/theme/theme_provider.dart';
 import '../../core/utils/app_logger.dart';
 import '../../core/utils/claude_rc_setup.dart';
+import '../../core/utils/shell_utils.dart';
 import '../../core/utils/streaming_utf8_decoder.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/ssh/known_hosts_store.dart';
@@ -504,6 +505,28 @@ class TerminalConnectionNotifier
     }
   }
 
+  /// 通知の返信テキストを、この接続の tmux セッションで実行中の Claude 等に
+  /// send-keys で投入し、Enter で送信する（次の指示を送る）。
+  /// exec チャネルで実行するため PTY のアタッチ状態に依存しない。
+  /// tmux セッションでない・未接続の場合は何もしない。
+  Future<void> sendTmuxInstruction(String text) async {
+    final channelManager = _channelManager;
+    final tmux = _tmuxSessionName;
+    if (channelManager == null || tmux == null || tmux.isEmpty) return;
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    final t = shellQuote(tmux);
+    final body = shellQuote(trimmed);
+    try {
+      // -l で literal（キー名として解釈させない）、-- で先頭ダッシュも安全に。
+      await channelManager.runCommand(
+        'tmux send-keys -t $t -l -- $body && tmux send-keys -t $t Enter',
+      );
+    } catch (e) {
+      AppLogger.instance.log('[SSH][$arg] send instruction failed: $e');
+    }
+  }
+
   /// tmux タブの場合、再接続後に自動で tmux セッションにリアタッチする。
   /// PTY の stdout からデータを受信するまで待機してからコマンドを送信する。
   /// これによりシェルの初期化（.bashrc 等）が完了してから attach する。
@@ -866,10 +889,28 @@ class TerminalConnectionNotifier
             : lang == 'id'
                 ? 'Claude Code selesai'
                 : 'Claude Code finished';
+        // tmux セッションのタブだけ、通知からのインライン返信（次の指示送信）を出す。
+        final canReply = _tmuxSessionName != null && _tmuxSessionName!.isNotEmpty;
+        final replyLabel = !canReply
+            ? null
+            : lang == 'ja'
+                ? '返信'
+                : lang == 'id'
+                    ? 'Balas'
+                    : 'Reply';
+        final replyHint = !canReply
+            ? null
+            : lang == 'ja'
+                ? 'Claude に次の指示を送信…'
+                : lang == 'id'
+                    ? 'Kirim instruksi ke Claude…'
+                    : 'Send an instruction to Claude…';
         NotificationService.instance.showCommandFinished(
           sessionId: arg,
           title: label,
           body: '$finished · $host',
+          replyLabel: replyLabel,
+          replyHint: replyHint,
         );
         _notificationSent = true;
       }

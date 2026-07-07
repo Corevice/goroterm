@@ -4627,4 +4627,78 @@ void main() {
       });
     });
   });
+
+  // -------------------------------------------------------------------------
+  // sendTmuxInstruction() — 通知のインライン返信を tmux セッションへ送る
+  // -------------------------------------------------------------------------
+  group('sendTmuxInstruction()', () {
+    late ProviderContainer container;
+    late TerminalConnectionNotifier notifier;
+
+    setUp(() {
+      registerFallbackValue('');
+      container = makeContainer();
+      notifier = container.read(
+        terminalConnectionProvider('send-instr-test').notifier,
+      );
+    });
+
+    tearDown(() => container.dispose());
+
+    test('sends shell-quoted send-keys to the tmux session', () async {
+      final mockManager = _MockSshChannelManager();
+      when(() => mockManager.runCommand(any()))
+          .thenAnswer((_) async => Uint8List(0));
+      notifier.setChannelManagerForTesting(mockManager);
+      notifier.setTmuxSessionNameForTesting('malme-3');
+
+      await notifier.sendTmuxInstruction('次のテストを書いて');
+
+      verify(() => mockManager.runCommand(
+            "tmux send-keys -t 'malme-3' -l -- '次のテストを書いて' "
+            "&& tmux send-keys -t 'malme-3' Enter",
+          )).called(1);
+    });
+
+    test('shell-escapes single quotes and leading dashes safely', () async {
+      final mockManager = _MockSshChannelManager();
+      when(() => mockManager.runCommand(any()))
+          .thenAnswer((_) async => Uint8List(0));
+      notifier.setChannelManagerForTesting(mockManager);
+      notifier.setTmuxSessionNameForTesting("it's");
+
+      await notifier.sendTmuxInstruction("--help を実行");
+
+      verify(() => mockManager.runCommand(
+            r"tmux send-keys -t 'it'\''s' -l -- '--help を実行' "
+            r"&& tmux send-keys -t 'it'\''s' Enter",
+          )).called(1);
+    });
+
+    test('no-op when not a tmux session', () async {
+      final mockManager = _MockSshChannelManager();
+      notifier.setChannelManagerForTesting(mockManager);
+      notifier.setTmuxSessionNameForTesting(null);
+
+      await notifier.sendTmuxInstruction('hello');
+
+      verifyNever(() => mockManager.runCommand(any()));
+    });
+
+    test('no-op when channelManager is null (not connected)', () async {
+      notifier.setTmuxSessionNameForTesting('malme-3');
+      // No channel manager set.
+      await expectLater(notifier.sendTmuxInstruction('hello'), completes);
+    });
+
+    test('no-op for blank text', () async {
+      final mockManager = _MockSshChannelManager();
+      notifier.setChannelManagerForTesting(mockManager);
+      notifier.setTmuxSessionNameForTesting('malme-3');
+
+      await notifier.sendTmuxInstruction('   ');
+
+      verifyNever(() => mockManager.runCommand(any()));
+    });
+  });
 }
