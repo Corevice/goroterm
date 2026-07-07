@@ -1,1 +1,1 @@
-• Peningkatan: notifikasi selesai kini menunjukkan sesi mana yang selesai (nama sesi di judul) dengan pesan yang jelas.
+• Baru: balas langsung dari notifikasi selesai Claude Code untuk mengirim instruksi berikutnya ke sesi itu (saat aplikasi/sesi berjalan).

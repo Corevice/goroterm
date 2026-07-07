@@ -1,1 +1,1 @@
-• Improved: the completion notification now shows which session finished (session name in the title) and a clear "Claude Code finished" message.
+• New: reply straight from the Claude Code completion notification to send the next instruction to that session (while the app/session is running).
