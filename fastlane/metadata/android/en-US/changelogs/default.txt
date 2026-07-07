@@ -1,1 +1,1 @@
-• Improved: the completion notification now shows a preview of Claude's last output, so you can see what happened and reply with the next instruction.
+• Improved: the completion notification shows more of Claude's output, and opening one notification no longer dismisses the others.
