@@ -1,1 +1,1 @@
-• New: set a "Claude system prompt file" per connection. On that server, running claude automatically adds --system-prompt-file (whether typed or via the button). Leave empty for the normal claude command.
+• Improved: the completion notification now shows which session finished (session name in the title) and a clear "Claude Code finished" message.

@@ -1,1 +1,1 @@
-• Baru: tetapkan "file system prompt Claude" per koneksi. Di server itu, menjalankan claude otomatis menambahkan --system-prompt-file. Kosongkan untuk perintah claude biasa.
+• Peningkatan: notifikasi selesai kini menunjukkan sesi mana yang selesai (nama sesi di judul) dengan pesan yang jelas.
