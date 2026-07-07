@@ -119,14 +119,22 @@ class NotificationService {
 
   /// 完了通知を表示する。表示テキストは呼び出し側でロケールに合わせて
   /// 組み立て、[title]（セッション名を先頭に）と [body]（何が完了したか）を渡す。
+  /// 完了通知を表示する。
+  /// [title] はセッション名（一覧で識別）、[summary] は「Claude Code finished ·
+  /// host」等の一行要約、[preview] は Claude の最後の出力プレビュー（展開表示）。
   Future<void> showCommandFinished({
     required String sessionId,
     required String title,
-    required String body,
+    required String summary,
+    String? preview,
     String? replyLabel,
     String? replyHint,
   }) async {
     if (!_initialized) return;
+
+    final hasPreview = preview != null && preview.trim().isNotEmpty;
+    // 折りたたみ時に見える本文。プレビューがあればそれ、無ければ要約。
+    final body = hasPreview ? preview.trim() : summary;
 
     // インライン返信アクション（次の指示を Claude に送る）。
     // replyLabel が指定されたときだけ付与する。
@@ -155,6 +163,12 @@ class NotificationService {
       priority: Priority.high,
       groupKey: sessionId,
       actions: androidActions,
+      // 展開すると Claude の最後の出力プレビューを複数行で表示する。
+      styleInformation: BigTextStyleInformation(
+        body,
+        contentTitle: title,
+        summaryText: summary,
+      ),
     );
     final iosDetails = DarwinNotificationDetails(
       presentBanner: true,
@@ -163,6 +177,8 @@ class NotificationService {
       interruptionLevel: InterruptionLevel.active,
       threadIdentifier: sessionId,
       categoryIdentifier: replyLabel == null ? null : _kReplyCategoryId,
+      // iOS は subtitle に要約、本文にプレビューを出す。
+      subtitle: hasPreview ? summary : null,
     );
     final details = NotificationDetails(
       android: androidDetails,

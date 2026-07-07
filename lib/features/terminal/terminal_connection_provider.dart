@@ -18,6 +18,7 @@ import '../../core/utils/app_logger.dart';
 import '../../core/utils/claude_rc_setup.dart';
 import '../../core/utils/shell_utils.dart';
 import '../../core/utils/streaming_utf8_decoder.dart';
+import '../../core/utils/terminal_preview.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/ssh/known_hosts_store.dart';
 import '../tmux/tmux_commands.dart';
@@ -908,7 +909,8 @@ class TerminalConnectionNotifier
         NotificationService.instance.showCommandFinished(
           sessionId: arg,
           title: label,
-          body: '$finished · $host',
+          summary: '$finished · $host',
+          preview: _terminalPreview(),
           replyLabel: replyLabel,
           replyHint: replyHint,
         );
@@ -947,6 +949,21 @@ class TerminalConnectionNotifier
   /// 例: "* Forming…", "* Thinking…", "● Pondering…"
   static final RegExp _spinnerVerbPattern =
       RegExp(r'\w+(ing|ed)\s*[…\.]');
+
+  /// 通知に載せる「Claude が最後に何をしたか」のプレビュー文字列を返す。
+  /// 端末バッファ末尾の行を集め、UI 装飾を除いて意味のある数行を抽出する。
+  String? _terminalPreview() {
+    final terminal = state.terminal;
+    if (terminal == null) return null;
+    final lines = terminal.buffer.lines;
+    final n = lines.length;
+    if (n == 0) return null;
+    final start = (n - 60).clamp(0, n);
+    final texts = <String>[
+      for (var y = start; y < n; y++) lines[y].getText(),
+    ];
+    return extractNotificationPreview(texts);
+  }
 
   /// Terminal.onOutput コールバック。
   void _onTerminalOutput(String data) {
