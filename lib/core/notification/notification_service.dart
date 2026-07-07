@@ -87,11 +87,12 @@ class NotificationService {
   /// セッションIDからAndroid通知IDを生成する（安定したハッシュ値）。
   int _notificationId(String sessionId) => sessionId.hashCode & 0x7FFFFFFF;
 
+  /// 完了通知を表示する。表示テキストは呼び出し側でロケールに合わせて
+  /// 組み立て、[title]（セッション名を先頭に）と [body]（何が完了したか）を渡す。
   Future<void> showCommandFinished({
-    required String host,
     required String sessionId,
-    String? tabLabel,
-    String? body,
+    required String title,
+    required String body,
   }) async {
     if (!_initialized) return;
 
@@ -118,14 +119,10 @@ class NotificationService {
       macOS: iosDetails,
     );
 
-    final title = tabLabel != null
-        ? 'Command finished on $host ($tabLabel)'
-        : 'Command finished on $host';
-
     await _plugin.show(
       _notificationId(sessionId),
       title,
-      body ?? 'Terminal output has stopped.',
+      body,
       details,
       payload: sessionId,
     );

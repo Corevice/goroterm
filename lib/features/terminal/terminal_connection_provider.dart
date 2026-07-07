@@ -13,6 +13,7 @@ import '../../core/network/connectivity_monitor.dart';
 import '../../core/notification/notification_service.dart';
 import '../../core/ssh/connection_config.dart';
 import '../../core/ssh/ssh_client_service.dart';
+import '../../core/theme/theme_provider.dart';
 import '../../core/utils/app_logger.dart';
 import '../../core/utils/claude_rc_setup.dart';
 import '../../core/utils/streaming_utf8_decoder.dart';
@@ -806,6 +807,20 @@ class TerminalConnectionNotifier
     AppLogger.instance.log('[SSH][$arg] OSC 52: copied ${text.length} chars to clipboard');
   }
 
+  /// 通知テキストの言語コードを返す。アプリのロケール設定を優先し、
+  /// 未設定（システム追従）ならシステムロケールにフォールバックする。
+  /// 取得に失敗する環境（テスト等）では 'en' を返す。
+  String _notificationLanguageCode() {
+    try {
+      final appLocale = ref.read(localeProvider);
+      if (appLocale != null) return appLocale.languageCode.toLowerCase();
+      return WidgetsBinding.instance.platformDispatcher.locale.languageCode
+          .toLowerCase();
+    } catch (_) {
+      return 'en';
+    }
+  }
+
   void _resetIdleNotifyTimer() {
     _idleNotifyTimer?.cancel();
     // フォアグラウンド時はタイマーを設定しない（バイトカウントのみ蓄積）
@@ -840,10 +855,21 @@ class TerminalConnectionNotifier
             .where((s) => s.sessionId == arg)
             .map((s) => s.label)
             .firstOrNull;
+        // この通知は Claude が稼働→完了したときだけ出る（上のガード）。
+        // 「どのセッションか」をタイトル先頭に、本文で完了内容＋ホストを示す。
+        final label = (tabLabel != null && tabLabel.trim().isNotEmpty)
+            ? tabLabel.trim()
+            : host;
+        final lang = _notificationLanguageCode();
+        final finished = lang == 'ja'
+            ? 'Claude Code の作業が完了しました'
+            : lang == 'id'
+                ? 'Claude Code selesai'
+                : 'Claude Code finished';
         NotificationService.instance.showCommandFinished(
-          host: host,
           sessionId: arg,
-          tabLabel: tabLabel,
+          title: label,
+          body: '$finished · $host',
         );
         _notificationSent = true;
       }
