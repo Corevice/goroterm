@@ -271,14 +271,10 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     }
     if (state == AppLifecycleState.resumed) {
       TerminalConnectionNotifier.setAppInBackground(false);
-      // 全セッションの通知をキャンセル＋フラグリセット
-      final managerState = ref.read(sessionManagerProvider);
-      for (final session in managerState.sessions) {
-        NotificationService.instance.cancelForSession(session.sessionId);
-        ref
-            .read(terminalConnectionProvider(session.sessionId).notifier)
-            .clearNotificationFlag();
-      }
+      // 通知は一括で消さない。ユーザーが実際に開いた/表示したセッションの
+      // 通知だけを消す（通知タップ時は app.dart の onSelectSession、
+      // アプリ内でのタブ表示時は _TerminalTabContent.didUpdateWidget）。
+      // これにより複数通知の 1 つを開いても他の通知は残る。
       // フォアグラウンドサービスのおかげで通常は接続維持されているが、
       // 万一の切断に備えて短い遅延後にチェック
       Future.delayed(const Duration(milliseconds: 1500), () {

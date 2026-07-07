@@ -9,8 +9,8 @@ final RegExp _leadingDecoration = RegExp(r'^[\s─-╿│┃|>❯⏵◍●○•
 /// [lines] は上から順の行テキスト（ANSI 除去済み）。
 String? extractNotificationPreview(
   List<String> lines, {
-  int maxLines = 8,
-  int maxChars = 600,
+  int maxLines = 20,
+  int maxChars = 2000,
 }) {
   final picked = <String>[];
   for (var y = lines.length - 1; y >= 0 && picked.length < maxLines; y--) {

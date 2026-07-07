@@ -32,6 +32,11 @@ class _TerminalSshAppState extends ConsumerState<TerminalSshApp> {
     // 通知タップ → 該当セッションをアクティブにして /terminal までナビゲート。
     NotificationService.instance.onSelectSession = (sessionId) {
       if (!mounted) return;
+      // 開いたセッションの通知だけを消す（他セッションの通知は残す）。
+      NotificationService.instance.cancelForSession(sessionId);
+      ref
+          .read(terminalConnectionProvider(sessionId).notifier)
+          .clearNotificationFlag();
       ref.read(sessionManagerProvider.notifier).setActiveSession(sessionId);
       final navigator = globalNavigatorKey.currentState;
       if (navigator == null) return;
