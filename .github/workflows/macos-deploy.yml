@@ -72,6 +72,32 @@ jobs:
           flutter build macos --release --build-number="$BUILD_NUMBER"
           codesign -dv --verbose=4 build/macos/Build/Products/Release/Goroterm.app 2>&1 | head -20
 
+      # Sparkle.framework の内部ヘルパー(XPC / Updater.app / Autoupdate)は
+      # Sparkle 配布時の署名のままだと、公証に必要な Hardened Runtime + secure
+      # timestamp + 自分の Developer ID を満たさず notarize が Invalid になる。
+      # 内側から署名し直し、最後にアプリ本体を entitlements 維持で再シールする。
+      - name: Re-sign Sparkle for notarization (hardened runtime)
+        run: |
+          set -euo pipefail
+          APP="build/macos/Build/Products/Release/Goroterm.app"
+          FW="$APP/Contents/Frameworks/Sparkle.framework"
+          if [ ! -d "$FW" ]; then echo "Sparkle.framework not found; skipping"; exit 0; fi
+          ID="$MACOS_SIGNING_IDENTITY"
+          V="$FW/Versions/Current"
+          for xpc in "$V"/XPCServices/*.xpc; do
+            [ -e "$xpc" ] && codesign --force --options runtime --timestamp --sign "$ID" "$xpc"
+          done
+          [ -e "$V/Autoupdate" ] && codesign --force --options runtime --timestamp --sign "$ID" "$V/Autoupdate"
+          [ -e "$V/Updater.app" ] && codesign --force --options runtime --timestamp --sign "$ID" "$V/Updater.app"
+          codesign --force --options runtime --timestamp --sign "$ID" "$FW"
+          # Sparkle を触ったのでアプリ本体を再シール(元の entitlements を明示)
+          codesign --force --options runtime --timestamp \
+            --entitlements macos/Runner/Release.entitlements \
+            --sign "$ID" "$APP"
+          echo "=== verify nested Sparkle signatures ==="
+          codesign --verify --strict --verbose=2 "$FW" 2>&1 | tail -3 || true
+          codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -3 || true
+
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:

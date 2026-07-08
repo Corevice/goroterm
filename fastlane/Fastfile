@@ -198,9 +198,22 @@ platform :mac do
     key_file.close
 
     UI.message("Submitting #{dmg_path} to notarytool…")
-    sh("xcrun notarytool submit '../#{dmg_path}' " \
+    submit_out = sh("xcrun notarytool submit '../#{dmg_path}' " \
        "--key '#{key_file.path}' --key-id '#{key_id}' --issuer '#{issuer_id}' " \
        "--wait --output-format json")
+
+    # status != Accepted なら却下理由(どのバイナリが問題か)をログ出力してから失敗する。
+    require "json"
+    info = (JSON.parse(submit_out.lines.last.to_s.strip) rescue {})
+    if info["status"] != "Accepted"
+      sub_id = info["id"]
+      if sub_id
+        UI.error("Notarization #{info['status']}. Fetching notarytool log…")
+        sh("xcrun notarytool log '#{sub_id}' " \
+           "--key '#{key_file.path}' --key-id '#{key_id}' --issuer '#{issuer_id}' || true")
+      end
+      UI.user_error!("Notarization failed with status: #{info['status']}")
+    end
 
     UI.message("Stapling notarization ticket…")
     sh("xcrun stapler staple '../#{dmg_path}'")
