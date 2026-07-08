@@ -32,5 +32,12 @@
 	<string>Voice input for terminal commands</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone access for voice input</string>
+	<!-- Sparkle 自動アップデート: 更新パッケージの EdDSA 署名を検証する公開鍵。
+	     対応する秘密鍵は CI シークレット(SPARKLE_ED_PRIVATE_KEY)で署名に使う。
+	     フィード URL は起動時に auto_updater.setFeedURL で動的に設定する。 -->
+	<key>SUPublicEDKey</key>
+	<string>bOtfQYsyCNVoRKl0DzH1Mwr/QMRoAfGcE+ppnxfvMcs=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 </dict>
 </plist>

@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/debug/pty_byte_recorder.dart';
 import '../../core/preferences/power_settings.dart';
 import '../../core/theme/theme_provider.dart';
+import '../../core/update/desktop_updater.dart';
 import '../../core/utils/app_logger.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -226,6 +227,15 @@ class SettingsScreen extends ConsumerWidget {
               },
             ),
           ),
+          if (DesktopUpdater.isSupported)
+            ListTile(
+              leading: const Icon(Icons.system_update_alt_outlined),
+              title: Text(l.checkForUpdates),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                DesktopUpdater.checkNow();
+              },
+            ),
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: Text(l.version),

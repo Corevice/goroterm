@@ -45,10 +45,35 @@ jobs:
           Compress-Archive -Path "$src\*" -DestinationPath $zip
           Get-Item $zip | Select-Object FullName, Length
 
-      - name: Upload ZIP to GitHub Release
+      - name: Sign update and generate WinSparkle appcast
+        shell: bash
+        env:
+          SPARKLE_DSA_PRIVATE_KEY: ${{ secrets.SPARKLE_DSA_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          ZIP=$(ls build/windows/release/Goroterm-Windows-*.zip | head -1)
+          echo "Signing ZIP: $ZIP"
+          printf '%s' "$SPARKLE_DSA_PRIVATE_KEY" > dsa_priv.pem
+          # WinSparkle の DSA-SHA1 署名(旧 Sparkle 互換フォーマット)。
+          SIG=$(openssl dgst -sha1 -binary < "$ZIP" | openssl dgst -sha1 -sign dsa_priv.pem | openssl enc -base64 | tr -d '\r\n')
+          rm -f dsa_priv.pem
+          if [ -z "$SIG" ]; then echo "DSA signing failed"; exit 1; fi
+          LEN=$(wc -c < "$ZIP" | tr -d '[:space:]')
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | sed 's/+.*//' | tr -d '[:space:]')
+          TAG=${GITHUB_REF_NAME}
+          ZIP_NAME=$(basename "$ZIP")
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ZIP_NAME}"
+          PUBDATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">\n  <channel>\n    <title>Goroterm</title>\n    <item>\n      <title>%s</title>\n      <pubDate>%s</pubDate>\n      <enclosure url="%s" sparkle:version="%s" sparkle:dsaSignature="%s" length="%s" type="application/octet-stream" />\n    </item>\n  </channel>\n</rss>\n' \
+            "$VERSION" "$PUBDATE" "$URL" "$VERSION" "$SIG" "$LEN" > appcast-windows.xml
+          echo "--- appcast-windows.xml ---"; cat appcast-windows.xml
+
+      - name: Upload ZIP and appcast to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/windows/release/Goroterm-Windows-*.zip
+          files: |
+            build/windows/release/Goroterm-Windows-*.zip
+            appcast-windows.xml
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

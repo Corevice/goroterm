@@ -1,0 +1,37 @@
+name: Windows Build Check
+
+# 署名・配布なしのコンパイル確認専用。
+# Linux 開発環境では Windows ネイティブ(WinSparkle / リソース)をビルドできない
+# ため、windows/ に触れたブランチを push した時点でビルドを検証する。
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows-build-check.yml'
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.4'
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows (Release)
+        env:
+          CMAKE_GENERATOR: Visual Studio 17 2022
+        run: flutter build windows --release

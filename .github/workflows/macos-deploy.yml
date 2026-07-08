@@ -85,10 +85,38 @@ jobs:
           APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
         run: bundle exec fastlane mac deploy
 
-      - name: Upload DMG to GitHub Release
+      - name: Sign update and generate Sparkle appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          DMG=$(ls build/macos/release/Goroterm-*.dmg | head -1)
+          echo "Signing DMG: $DMG"
+          # Sparkle 公式ツール(sign_update)を取得。EdDSA 署名を生成する。
+          curl -sSL https://github.com/sparkle-project/Sparkle/releases/download/2.6.4/Sparkle-2.6.4.tar.xz -o sparkle.tar.xz
+          mkdir -p sparkle && tar xf sparkle.tar.xz -C sparkle
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > ed_priv.txt
+          SIGOUT=$(sparkle/bin/sign_update "$DMG" --ed-key-file ed_priv.txt)
+          rm -f ed_priv.txt
+          ED_SIG=$(printf '%s' "$SIGOUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
+          LEN=$(printf '%s' "$SIGOUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')
+          if [ -z "$ED_SIG" ] || [ -z "$LEN" ]; then echo "sign_update failed: $SIGOUT"; exit 1; fi
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | sed 's/+.*//' | tr -d '[:space:]')
+          BUILD=${{ github.run_number }}
+          TAG=${GITHUB_REF_NAME}
+          DMG_NAME=$(basename "$DMG")
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${DMG_NAME}"
+          PUBDATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
+          printf '<?xml version="1.0" standalone="yes"?>\n<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">\n  <channel>\n    <title>Goroterm</title>\n    <item>\n      <title>%s</title>\n      <pubDate>%s</pubDate>\n      <sparkle:version>%s</sparkle:version>\n      <sparkle:shortVersionString>%s</sparkle:shortVersionString>\n      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>\n      <enclosure url="%s" sparkle:edSignature="%s" length="%s" type="application/octet-stream" />\n    </item>\n  </channel>\n</rss>\n' \
+            "$VERSION" "$PUBDATE" "$BUILD" "$VERSION" "$URL" "$ED_SIG" "$LEN" > appcast-macos.xml
+          echo "--- appcast-macos.xml ---"; cat appcast-macos.xml
+
+      - name: Upload DMG and appcast to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/macos/release/Goroterm-*.dmg
+          files: |
+            build/macos/release/Goroterm-*.dmg
+            appcast-macos.xml
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

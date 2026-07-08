@@ -57,6 +57,16 @@ IDI_APP_ICON            ICON                    "resources\\app_icon.ico"
 
 /////////////////////////////////////////////////////////////////////////////
 //
+// WinSparkle
+//
+// 自動アップデート(WinSparkle)が更新パッケージの署名を検証するための
+// DSA 公開鍵。対応する秘密鍵は CI シークレット(SPARKLE_DSA_PRIVATE_KEY)で
+// appcast の dsaSignature 生成に使う。
+DSAPub DSAPEM "dsa_pub.pem"
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
 // Version
 //
 

@@ -12,6 +12,7 @@ import 'core/notification/notification_service.dart';
 import 'core/platform/detached_session_args.dart';
 import 'core/preferences/power_settings.dart';
 import 'core/storage/database.dart';
+import 'core/update/desktop_updater.dart';
 import 'features/connections/connection_provider.dart';
 
 void main(List<String> args) async {
@@ -34,6 +35,13 @@ void main(List<String> args) async {
   try {
     await NotificationService.instance.init();
   } catch (_) {}
+
+  // デスクトップ自動アップデート。タブ分離ウィンドウ(detachedSession != null)は
+  // メインウィンドウと重複して更新ダイアログが出ないよう、メインのみで起動する。
+  if (detachedSession == null && DesktopUpdater.isSupported) {
+    // 起動をブロックしないよう await しない。
+    DesktopUpdater.init();
+  }
 
   late AppDatabase db;
   try {
