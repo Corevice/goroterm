@@ -371,6 +371,17 @@ print(json.dumps(result))
             color: _getBarColor(usage.sevenDaySonnet!.utilization),
           ),
 
+        // モデル別の週次リミット（Fable 等）。新しい usage API の limits 由来。
+        for (final m in usage.modelWeeklyLimits) ...[
+          _buildUsageBar(
+            label: l.limit7DayModel(m.modelName),
+            utilization: m.utilization,
+            resetsAt: m.resetsAt,
+            color: _getBarColor(m.utilization),
+          ),
+          const SizedBox(height: 12),
+        ],
+
         // Extra usage
         if (usage.extraUsageEnabled == true) ...[
           const SizedBox(height: 12),
@@ -490,6 +501,7 @@ class _UsageData {
     this.sevenDay,
     this.sevenDayOpus,
     this.sevenDaySonnet,
+    this.modelWeeklyLimits = const [],
     this.extraUsageEnabled,
     this.extraUsageUtilization,
     this.extraUsageCredits,
@@ -503,6 +515,11 @@ class _UsageData {
   final _LimitInfo? sevenDay;
   final _LimitInfo? sevenDayOpus;
   final _LimitInfo? sevenDaySonnet;
+
+  /// モデル別の週次リミット（例: Fable）。新しい usage API の `limits` 配列内
+  /// `kind == "weekly_scoped"` から取得する。
+  final List<_ModelLimit> modelWeeklyLimits;
+
   final bool? extraUsageEnabled;
   final double? extraUsageUtilization;
   final double? extraUsageCredits;
@@ -519,6 +536,7 @@ class _UsageData {
       sevenDay: _LimitInfo.fromJson(usage['seven_day']),
       sevenDayOpus: _LimitInfo.fromJson(usage['seven_day_opus']),
       sevenDaySonnet: _LimitInfo.fromJson(usage['seven_day_sonnet']),
+      modelWeeklyLimits: _ModelLimit.listFromUsage(usage['limits']),
       extraUsageEnabled:
           (usage['extra_usage'] as Map<String, dynamic>?)?['is_enabled']
               as bool?,
@@ -531,6 +549,41 @@ class _UsageData {
               as num?)
               ?.toDouble(),
     );
+  }
+}
+
+/// モデル別（scope.model）の週次リミット。usage['limits'] の
+/// `kind == "weekly_scoped"` エントリから作る。
+class _ModelLimit {
+  _ModelLimit({
+    required this.modelName,
+    required this.utilization,
+    this.resetsAt,
+  });
+
+  final String modelName;
+  final double utilization;
+  final DateTime? resetsAt;
+
+  static List<_ModelLimit> listFromUsage(dynamic limits) {
+    if (limits is! List) return const [];
+    final result = <_ModelLimit>[];
+    for (final entry in limits) {
+      if (entry is! Map) continue;
+      if (entry['kind'] != 'weekly_scoped') continue;
+      final scope = entry['scope'];
+      final model = scope is Map ? scope['model'] : null;
+      final name = model is Map ? model['display_name'] as String? : null;
+      if (name == null || name.isEmpty) continue;
+      final pct = (entry['percent'] as num?)?.toDouble() ?? 0;
+      final resetsStr = entry['resets_at'] as String?;
+      result.add(_ModelLimit(
+        modelName: name,
+        utilization: pct,
+        resetsAt: resetsStr != null ? DateTime.tryParse(resetsStr) : null,
+      ));
+    }
+    return result;
   }
 }
 

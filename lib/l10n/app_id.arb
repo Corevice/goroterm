@@ -168,6 +168,8 @@
   "limit7Day": "Batas 7 Hari",
   "limit7DayOpus": "7 Hari Opus",
   "limit7DaySonnet": "7 Hari Sonnet",
+  "limit7DayModel": "7 Hari {model}",
+  "@limit7DayModel": { "placeholders": { "model": { "type": "String" } } },
   "extraUsage": "Penggunaan Tambahan",
   "remainingPercent": "Sisa {percent}%",
   "resetsAt": "Direset {when}",

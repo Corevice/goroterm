@@ -202,6 +202,8 @@
   "limit7Day": "7-Day Limit",
   "limit7DayOpus": "7-Day Opus",
   "limit7DaySonnet": "7-Day Sonnet",
+  "limit7DayModel": "7-Day {model}",
+  "@limit7DayModel": { "placeholders": { "model": { "type": "String" } } },
   "extraUsage": "Extra Usage",
   "remainingPercent": "{percent}% remaining",
   "@remainingPercent": { "placeholders": { "percent": { "type": "String" } } },

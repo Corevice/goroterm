@@ -168,6 +168,8 @@
   "limit7Day": "7 日制限",
   "limit7DayOpus": "7 日 Opus",
   "limit7DaySonnet": "7 日 Sonnet",
+  "limit7DayModel": "7 日 {model}",
+  "@limit7DayModel": { "placeholders": { "model": { "type": "String" } } },
   "extraUsage": "追加使用量",
   "remainingPercent": "残り {percent}%",
   "resetsAt": "リセット: {when}",

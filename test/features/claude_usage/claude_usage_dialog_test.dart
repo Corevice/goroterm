@@ -85,6 +85,38 @@ final _extraUsageResponse = json.encode({
   },
 });
 
+/// Response using the new `limits` array with a model-scoped (Fable) weekly limit.
+final _fableResponse = json.encode({
+  'subscription': 'max',
+  'rateLimitTier': 'standard',
+  'usage': {
+    'five_hour': {
+      'utilization': 74.0,
+      'resets_at': DateTime.utc(2099, 1, 1, 12).toIso8601String(),
+    },
+    'seven_day': {
+      'utilization': 35.0,
+      'resets_at': DateTime.utc(2099, 1, 7).toIso8601String(),
+    },
+    'seven_day_opus': null,
+    'seven_day_sonnet': null,
+    'limits': [
+      {'kind': 'session', 'percent': 74, 'scope': null},
+      {'kind': 'weekly_all', 'percent': 35, 'scope': null},
+      {
+        'kind': 'weekly_scoped',
+        'percent': 58,
+        'resets_at': DateTime.utc(2099, 1, 7).toIso8601String(),
+        'scope': {
+          'model': {'id': null, 'display_name': 'Fable'},
+          'surface': null,
+        },
+      },
+    ],
+    'extra_usage': {'is_enabled': false},
+  },
+});
+
 /// Error response from the python script.
 final _errorResponse = json.encode({
   'error': 'Claude Code not found (~/.claude/.credentials.json missing)',
@@ -165,6 +197,25 @@ void main() {
 
       // Refresh button visible (not loading)
       expect(find.byIcon(Icons.refresh), findsOneWidget);
+    });
+
+    testWidgets('displays a model-scoped (Fable) weekly limit from limits',
+        (tester) async {
+      when(() => mockChannelManager.runCommand(any())).thenAnswer(
+        (_) async => Uint8List.fromList(utf8.encode(_fableResponse)),
+      );
+
+      await tester.pumpWidget(buildTestWidget(channelManager: mockChannelManager));
+      await tester.pump(const Duration(milliseconds: 10));
+
+      final context = tester.element(find.byType(Scaffold));
+      ClaudeUsageDialog.show(context, 'test-session');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+
+      // The Fable weekly limit bar (label + 42% remaining for 58% used).
+      expect(find.textContaining('Fable'), findsOneWidget);
+      expect(find.textContaining('42.0% remaining'), findsOneWidget);
     });
 
     testWidgets('shows error when SSH not connected', (tester) async {
