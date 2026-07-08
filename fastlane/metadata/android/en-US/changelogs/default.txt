@@ -1,1 +1,1 @@
-• Improved: completion notifications now fire while the app is open too (except for the session you're currently viewing), so you notice Claude finishing in other tabs.
+• New: the Claude Code Usage screen now shows model-scoped weekly limits (e.g. Fable).

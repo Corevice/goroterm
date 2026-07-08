@@ -1,1 +1,1 @@
-• Peningkatan: notifikasi selesai kini juga muncul saat aplikasi terbuka (kecuali sesi yang sedang Anda lihat), jadi Anda tahu Claude selesai di tab lain.
+• Baru: layar Claude Code Usage kini menampilkan batas mingguan per-model (mis. Fable).
