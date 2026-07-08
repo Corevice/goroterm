@@ -1,1 +1,1 @@
-• New: the Claude Code Usage screen now shows model-scoped weekly limits (e.g. Fable).
+• Fix (desktop): newly opened tmux session windows could appear separately instead of joining the front tab group.

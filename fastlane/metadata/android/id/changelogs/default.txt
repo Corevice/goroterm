@@ -1,1 +1,1 @@
-• Baru: layar Claude Code Usage kini menampilkan batas mingguan per-model (mis. Fable).
+• Perbaikan (desktop): jendela sesi tmux baru bisa muncul terpisah alih-alih bergabung ke grup tab depan.
