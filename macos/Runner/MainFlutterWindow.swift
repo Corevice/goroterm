@@ -147,6 +147,10 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
       defer: false)
     window.title = label
     window.isReleasedWhenClosed = false
+    // Flutter エンジンごと再生成されるセッションウィンドウは OS のウィンドウ復元
+    // 対象にしない。再起動時に追跡外のゴーストウィンドウが復元されて、新規
+    // セッションのタブ合流先判定と食い違うのを防ぐ。
+    window.isRestorable = false
     window.contentViewController = controller
     window.setContentSize(NSSize(width: 960, height: 640))
     window.delegate = self
@@ -245,12 +249,19 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
   }
 
   /// 新規セッションウィンドウを追加するタブグループのホストを返す。
-  /// アクティブなセッションウィンドウを優先し、無ければ既存のいずれかを使う。
+  /// (1) フォーカス中がセッションウィンドウならそれ、(2) z-order 最前面の
+  /// 可視セッションウィンドウ（現在の Space にあるものが選ばれやすい）、
+  /// (3) 既存のいずれか、の順で確実に既存グループへ合流させる。
   private func hostWindowForNewTab() -> NSWindow? {
     if let key = NSApp.keyWindow,
        controllers[key] != nil,
        key.isVisible {
       return key
+    }
+    if let front = NSApp.orderedWindows.first(where: {
+      controllers[$0] != nil && $0.isVisible
+    }) {
+      return front
     }
     return sessionWindows.last(where: { $0.isVisible })
   }
@@ -298,6 +309,11 @@ class MainFlutterWindow: NSWindow {
     // セッションタブグループには参加させない。混ざると二重タブになって
     // 紛らわしいので、自動タブ参加を無効にする。
     self.tabbingMode = .disallowed
+
+    // セッションウィンドウは復元できない (Flutter エンジンごと作り直すため)。
+    // メインウィンドウも復元対象から外し、再起動時に復元ウィンドウが
+    // セッションタブ合流判定と食い違うのを防ぐ。
+    self.isRestorable = false
 
     super.awakeFromNib()
   }
