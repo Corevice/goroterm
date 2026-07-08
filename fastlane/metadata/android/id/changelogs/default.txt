@@ -1,1 +1,1 @@
-• Perbaikan (desktop): jendela sesi tmux baru bisa muncul terpisah alih-alih bergabung ke grup tab depan.
+• Baru (desktop): versi macOS dan Windows kini mendukung pembaruan otomatis, dengan "Periksa Pembaruan" manual di Pengaturan.

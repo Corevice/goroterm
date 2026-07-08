@@ -1,1 +1,1 @@
-• Fix (desktop): newly opened tmux session windows could appear separately instead of joining the front tab group.
+• New (desktop): macOS and Windows builds now support automatic updates, with a manual "Check for Updates" in Settings.
