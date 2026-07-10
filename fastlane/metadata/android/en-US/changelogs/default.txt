@@ -1,1 +1,3 @@
-• New (desktop): macOS and Windows builds now support automatic updates, with a manual "Check for Updates" in Settings.
+• Desktop: opening a tmux session now appears as a tab in the same window as the connection, instead of a separate window.
+• Desktop: command-finished notifications now fire when the window is unfocused (like mobile).
+• Fix: Settings now shows the real app version.

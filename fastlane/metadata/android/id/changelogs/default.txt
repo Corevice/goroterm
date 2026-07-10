@@ -1,1 +1,3 @@
-• Baru (desktop): versi macOS dan Windows kini mendukung pembaruan otomatis, dengan "Periksa Pembaruan" manual di Pengaturan.
+• Desktop: membuka sesi tmux kini muncul sebagai tab di jendela yang sama dengan koneksi, bukan jendela terpisah.
+• Desktop: notifikasi selesai kini muncul saat jendela tidak fokus (seperti mobile).
+• Perbaikan: Pengaturan kini menampilkan versi aplikasi yang sebenarnya.
