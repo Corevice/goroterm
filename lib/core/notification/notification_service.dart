@@ -180,10 +180,17 @@ class NotificationService {
       // iOS は subtitle に要約、本文にプレビューを出す。
       subtitle: hasPreview ? summary : null,
     );
+    // Linux はプレビュー本文をそのまま出す。Windows も既定表示で本文を出す。
+    final linuxDetails = LinuxNotificationDetails(
+      defaultActionName: 'Open',
+    );
+    const windowsDetails = WindowsNotificationDetails();
     final details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
       macOS: iosDetails,
+      linux: linuxDetails,
+      windows: windowsDetails,
     );
 
     await _plugin.show(

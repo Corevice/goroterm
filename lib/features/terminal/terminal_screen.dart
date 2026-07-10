@@ -252,7 +252,18 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
+    // デスクトップはウィンドウが非フォーカスになっても paused にならず
+    // inactive / hidden 止まり。非フォーカス = バックグラウンド扱いにして、
+    // 別ウィンドウやアプリを見ている間に Claude が完了したら通知する
+    // (モバイルで背面に回したときと同じ挙動)。モバイルでは従来どおり
+    // paused のみ(inactive はアプリスイッチャー等でも発火するため)。
+    final isDesktop = Platform.isMacOS || Platform.isWindows || Platform.isLinux;
+    final isBackground = state == AppLifecycleState.paused ||
+        (isDesktop &&
+            (state == AppLifecycleState.inactive ||
+                state == AppLifecycleState.hidden));
+
+    if (isBackground) {
       TerminalConnectionNotifier.setAppInBackground(true);
       // バックグラウンドでは「表示中セッション」なし → 全セッションの完了で通知。
       TerminalConnectionNotifier.setVisibleSession(null);
@@ -263,13 +274,15 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
             .read(terminalConnectionProvider(session.sessionId).notifier)
             .resetIdleCounter();
       }
-      // バックグラウンド移行時に Drawer を閉じて黒画面を防止
-      // inactive ではなく paused のみ（inactive はアプリスイッチャー等でも発火する）
-      if (!mounted) return;
-      final scaffoldState = _scaffoldKey.currentState;
-      if (scaffoldState != null) {
-        if (scaffoldState.isDrawerOpen || scaffoldState.isEndDrawerOpen) {
-          Navigator.of(context).pop();
+      // Drawer を閉じて黒画面を防止するのはモバイルの実バックグラウンド
+      // (paused)のときだけ。デスクトップの一時的な非フォーカスでは閉じない。
+      if (state == AppLifecycleState.paused) {
+        if (!mounted) return;
+        final scaffoldState = _scaffoldKey.currentState;
+        if (scaffoldState != null) {
+          if (scaffoldState.isDrawerOpen || scaffoldState.isEndDrawerOpen) {
+            Navigator.of(context).pop();
+          }
         }
       }
     }

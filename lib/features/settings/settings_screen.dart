@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/debug/pty_byte_recorder.dart';
@@ -11,6 +12,18 @@ import '../../core/preferences/power_settings.dart';
 import '../../core/theme/theme_provider.dart';
 import '../../core/update/desktop_updater.dart';
 import '../../core/utils/app_logger.dart';
+
+/// 実際のアプリバージョン("1.3.77+95" 形式)。設定画面のバージョン表示と
+/// ライセンス画面で使う。取得失敗時は空文字。
+final appVersionProvider = FutureProvider<String>((ref) async {
+  try {
+    final info = await PackageInfo.fromPlatform();
+    final build = info.buildNumber.isNotEmpty ? '+${info.buildNumber}' : '';
+    return '${info.version}$build';
+  } catch (_) {
+    return '';
+  }
+});
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -205,8 +218,8 @@ class SettingsScreen extends ConsumerWidget {
               onTap: () {
                 showLicensePage(
                   context: context,
-                  applicationName: 'SSH Terminal',
-                  applicationVersion: '1.0.0',
+                  applicationName: 'Goroterm',
+                  applicationVersion: ref.read(appVersionProvider).valueOrNull ?? '',
                 );
               },
             ),
@@ -239,7 +252,9 @@ class SettingsScreen extends ConsumerWidget {
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: Text(l.version),
-            trailing: const Text('1.0.0'),
+            trailing: Text(
+              ref.watch(appVersionProvider).valueOrNull ?? '…',
+            ),
           ),
         ],
       ),

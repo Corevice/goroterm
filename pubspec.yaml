@@ -60,6 +60,8 @@ dependencies:
   in_app_update: ^4.2.3
   # デスクトップ(macOS/Windows)の自動アップデート。Sparkle / WinSparkle ラッパー。
   auto_updater: ^1.0.0
+  # 実際のアプリバージョン/ビルド番号を取得(設定画面のバージョン表示用)。
+  package_info_plus: ^8.0.0
 
 dev_dependencies:
   flutter_test:

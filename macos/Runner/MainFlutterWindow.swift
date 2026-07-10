@@ -56,6 +56,11 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
   private var tabBaseNames: [NSWindow: String] = [:]
   private var windowCounter = 0
 
+  /// メインウィンドウ (接続一覧 / 接続タブ)。セッションウィンドウと同じタブ
+  /// グループに参加させ、最初の tmux セッションもこのウィンドウのタブとして
+  /// 合流させるためにホスト候補として使う。
+  weak var mainWindow: NSWindow?
+
   /// Claude Code 稼働中のセッションキー集合と、スピナーアニメーション用タイマー。
   private var runningKeys: Set<String> = []
   private var spinnerTimer: Timer?
@@ -249,13 +254,13 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
   }
 
   /// 新規セッションウィンドウを追加するタブグループのホストを返す。
-  /// (1) フォーカス中がセッションウィンドウならそれ、(2) z-order 最前面の
-  /// 可視セッションウィンドウ（現在の Space にあるものが選ばれやすい）、
-  /// (3) 既存のいずれか、の順で確実に既存グループへ合流させる。
+  /// (1) フォーカス中がセッションウィンドウ or メインウィンドウならそれ、
+  /// (2) z-order 最前面の可視セッションウィンドウ（現在の Space が選ばれやすい）、
+  /// (3) 既存セッションウィンドウ、(4) 無ければメインウィンドウ(接続タブ) に
+  /// 合流させる。これで最初の tmux セッションも接続ウィンドウのタブになる。
   private func hostWindowForNewTab() -> NSWindow? {
-    if let key = NSApp.keyWindow,
-       controllers[key] != nil,
-       key.isVisible {
+    if let key = NSApp.keyWindow, key.isVisible,
+       controllers[key] != nil || key == mainWindow {
       return key
     }
     if let front = NSApp.orderedWindows.first(where: {
@@ -263,7 +268,13 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
     }) {
       return front
     }
-    return sessionWindows.last(where: { $0.isVisible })
+    if let lastSession = sessionWindows.last(where: { $0.isVisible }) {
+      return lastSession
+    }
+    if let main = mainWindow, main.isVisible {
+      return main
+    }
+    return nil
   }
 
   func windowDidBecomeKey(_ notification: Notification) {
@@ -305,10 +316,14 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
     registerCommonChannels(controller: flutterViewController)
 
-    // メインウィンドウはアプリ内タブバー (Flutter 製) を持つため、OS の
-    // セッションタブグループには参加させない。混ざると二重タブになって
-    // 紛らわしいので、自動タブ参加を無効にする。
-    self.tabbingMode = .disallowed
+    // メインウィンドウ(接続一覧 / 接続タブ)も tmux セッションウィンドウと
+    // 同じ OS タブグループに参加させる。これで「接続」と各 tmux セッションが
+    // 1 つのウィンドウのタブとしてまとまり、最初の tmux セッションが単独
+    // ウィンドウで飛び出さない。識別子を揃え、.preferred で通常ウィンドウ
+    // でもドラッグ切り離し・統合を有効にする。
+    self.tabbingIdentifier = DetachedWindowManager.sessionTabbingIdentifier
+    self.tabbingMode = .preferred
+    DetachedWindowManager.shared.mainWindow = self
 
     // セッションウィンドウは復元できない (Flutter エンジンごと作り直すため)。
     // メインウィンドウも復元対象から外し、再起動時に復元ウィンドウが
