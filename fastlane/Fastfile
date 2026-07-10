@@ -127,7 +127,7 @@ platform :ios do
          e.message.include?("cannot create new version") ||
          e.message.include?("could not find an editable version") ||
          e.message.include?("Cannot update languages")
-        UI.warn("Version #{app_version} is already being managed in ASC — skipping submit (TestFlight upload succeeded)")
+        UI.important("Version #{app_version} is already being managed in ASC — skipping submit (TestFlight upload succeeded)")
       else
         raise
       end
