@@ -235,6 +235,8 @@
   "privacyPolicyLabel": "Privacy policy",
   "privacyPolicy": "Privacy Policy",
   "checkForUpdates": "Check for Updates",
+  "testNotification": "Test Notification",
+  "testNotificationSent": "Test notification sent. If nothing appears, allow notifications for Goroterm in System Settings.",
   "version": "Version",
   "privacyLastUpdated": "Last updated: March 2026",
   "privacyDataWeHandle": "Data We Handle",

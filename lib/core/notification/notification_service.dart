@@ -100,6 +100,50 @@ class NotificationService {
     }
 
     _initialized = true;
+
+    // macOS / iOS はここでも明示的に許可要求する。init 設定だけだと
+    // 「未確定」のまま無音失敗することがあるため、確実にプロンプトを出す。
+    await requestPermissions();
+  }
+
+  /// macOS / iOS の通知許可を明示要求する。付与状況(bool)を返す。
+  /// 既に付与済みなら true、拒否なら false。macOS で「未確定」の場合は
+  /// システムのプロンプトが表示される。
+  Future<bool> requestPermissions() async {
+    try {
+      if (Platform.isMacOS) {
+        final granted = await _plugin
+            .resolvePlatformSpecificImplementation<
+                MacOSFlutterLocalNotificationsPlugin>()
+            ?.requestPermissions(alert: true, badge: false, sound: true);
+        return granted ?? false;
+      }
+      if (Platform.isIOS) {
+        final granted = await _plugin
+            .resolvePlatformSpecificImplementation<
+                IOSFlutterLocalNotificationsPlugin>()
+            ?.requestPermissions(alert: true, badge: false, sound: true);
+        return granted ?? false;
+      }
+    } catch (_) {}
+    return true;
+  }
+
+  /// 設定画面からの動作確認用。通知が実際に表示されるかを即座に確かめる。
+  Future<void> showTest() async {
+    if (!_initialized) {
+      try {
+        await init();
+      } catch (_) {}
+    }
+    await requestPermissions();
+    await showCommandFinished(
+      sessionId: 'goroterm-test',
+      title: 'goroterm',
+      summary: 'Test notification',
+      preview: 'If you can see this, desktop notifications are working. '
+          'Claude の完了通知もこのように表示されます。',
+    );
   }
 
   void _handleResponse(NotificationResponse response) {

@@ -198,6 +198,8 @@
   "privacyPolicyLabel": "プライバシーポリシー",
   "privacyPolicy": "プライバシーポリシー",
   "checkForUpdates": "アップデートを確認",
+  "testNotification": "通知をテスト",
+  "testNotificationSent": "テスト通知を送信しました。表示されない場合は、システム設定で Goroterm の通知を許可してください。",
   "version": "バージョン",
   "privacyLastUpdated": "最終更新: 2026 年 3 月",
   "privacyDataWeHandle": "扱うデータ",

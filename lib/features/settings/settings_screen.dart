@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/debug/pty_byte_recorder.dart';
+import '../../core/notification/notification_service.dart';
 import '../../core/preferences/power_settings.dart';
 import '../../core/theme/theme_provider.dart';
 import '../../core/update/desktop_updater.dart';
@@ -247,6 +248,19 @@ class SettingsScreen extends ConsumerWidget {
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 DesktopUpdater.checkNow();
+              },
+            ),
+          if (DesktopUpdater.isSupported)
+            ListTile(
+              leading: const Icon(Icons.notifications_active_outlined),
+              title: Text(l.testNotification),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                await NotificationService.instance.showTest();
+                messenger.showSnackBar(
+                  SnackBar(content: Text(l.testNotificationSent)),
+                );
               },
             ),
           ListTile(

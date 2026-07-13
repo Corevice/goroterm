@@ -198,6 +198,8 @@
   "privacyPolicyLabel": "Kebijakan privasi",
   "privacyPolicy": "Kebijakan Privasi",
   "checkForUpdates": "Periksa Pembaruan",
+  "testNotification": "Uji Notifikasi",
+  "testNotificationSent": "Notifikasi uji terkirim. Jika tidak muncul, izinkan notifikasi untuk Goroterm di Pengaturan Sistem.",
   "version": "Versi",
   "privacyLastUpdated": "Pembaruan terakhir: Maret 2026",
   "privacyDataWeHandle": "Data yang Kami Kelola",
