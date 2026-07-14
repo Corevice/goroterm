@@ -664,6 +664,67 @@ void main() {
   // scroll-back history across reconnection attempts.
   // -------------------------------------------------------------------------
 
+  group('Claude awaiting-input detection', () {
+    // 実端末ではプロンプトはビューポート下部（バッファ末尾付近）に描画される。
+    // ビューポート高さを内容に合わせて、末尾スキャン範囲に収める。
+    Terminal termWith(List<String> lines) {
+      final t = Terminal(maxLines: 200);
+      t.resize(120, lines.length);
+      t.write('${lines.join('\r\n')}\r\n');
+      return t;
+    }
+
+    test('detects a numbered selection prompt (❯ + options)', () {
+      final t = termWith([
+        'プレディクティブ別枠を消費する呼の定義はどれにしますか？',
+        '',
+        '❯ 1. AI自動発信のみ（推奨）',
+        '  2. AI発信すべて',
+        '  3. グループ同時呼出も別枠',
+        '  4. Type something.',
+      ]);
+      expect(
+        TerminalConnectionNotifier.isAwaitingInputForTesting(t),
+        isTrue,
+      );
+    });
+
+    test('detects a yes/no confirmation prompt', () {
+      final t = termWith([
+        'Do you want to proceed?',
+        '❯ 1. Yes',
+        '  2. No',
+      ]);
+      expect(
+        TerminalConnectionNotifier.isAwaitingInputForTesting(t),
+        isTrue,
+      );
+    });
+
+    test('does not fire on a normal idle shell / empty input box', () {
+      final t = termWith([
+        'user@host:~\$ ls',
+        'file1  file2  file3',
+        'user@host:~\$ ',
+      ]);
+      expect(
+        TerminalConnectionNotifier.isAwaitingInputForTesting(t),
+        isFalse,
+      );
+    });
+
+    test('does not fire on a shell prompt that uses ❯ without options', () {
+      final t = termWith([
+        'takayuki ~/work/goroterm',
+        '❯ ',
+      ]);
+      expect(
+        TerminalConnectionNotifier.isAwaitingInputForTesting(t),
+        isFalse,
+      );
+    });
+  });
+
   group('Terminal preservation via copyWith', () {
     test('copyWith preserves terminal reference when only status changes', () {
       final terminal = Terminal(maxLines: 50);

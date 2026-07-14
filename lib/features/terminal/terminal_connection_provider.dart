@@ -146,6 +146,11 @@ class TerminalConnectionNotifier
   /// 通知済みフラグ: 一度通知を送ったら、ユーザーがタブを確認するまで再通知しない
   bool _notificationSent = false;
 
+  /// Claude Code の入力待ち（選択プロンプト等）通知を送ったか。
+  /// プロンプトが消える（＝入力された/次へ進んだ）とリセットし、次のプロンプトで
+  /// 再び通知できるようにする。完了通知(_notificationSent)とは独立。
+  bool _awaitingInputNotified = false;
+
   /// 直近のアイドル基準以降に Claude Code が稼働していたか。
   ///
   /// 複数デバイスで同じ tmux セッションを共有していると、片方の画面サイズ
@@ -164,6 +169,7 @@ class TerminalConnectionNotifier
   /// ユーザーがこのタブを確認したことを記録し、通知済みフラグ＋バイトカウントをリセットする。
   void clearNotificationFlag() {
     _notificationSent = false;
+    _awaitingInputNotified = false;
     resetIdleCounter();
   }
 
@@ -767,6 +773,11 @@ class TerminalConnectionNotifier
   @visibleForTesting
   bool get isIdleTimerActiveForTesting => _idleNotifyTimer != null;
 
+  /// テスト専用: 入力待ちプロンプト検出ロジックを公開する。
+  @visibleForTesting
+  static bool isAwaitingInputForTesting(Terminal terminal) =>
+      _isClaudeAwaitingInput(terminal);
+
   /// テスト専用: _notificationSent フラグの現在値を返す。
   @visibleForTesting
   bool get isNotificationSentForTesting => _notificationSent;
@@ -882,6 +893,12 @@ class TerminalConnectionNotifier
           _outputBytesSinceLastIdle = 0;
           return;
         }
+        // 入力待ちプロンプトは「完了」ではない。完了通知は出さず、入力待ち
+        // 通知（_claudeDetectTimer 側）に任せて二重通知を防ぐ。
+        if (terminal != null && _isClaudeAwaitingInput(terminal)) {
+          _outputBytesSinceLastIdle = 0;
+          return;
+        }
         // リサイズ等の全画面再描画では Claude は稼働していない。実際に
         // Claude が稼働→アイドルに遷移したときだけ「完了」として通知し、
         // 共有セッションのリサイズ嵐による誤通知を防ぐ。
@@ -967,6 +984,75 @@ class TerminalConnectionNotifier
   static final RegExp _spinnerVerbPattern =
       RegExp(r'\w+(ing|ed)\s*[…\.]');
 
+  /// 選択カーソル "❯ 1." 等（選択中の項目）。
+  static final RegExp _promptSelectorPattern = RegExp(r'❯\s*\d+[.)]');
+
+  /// 番号付き選択肢の行（選択中"❯ 1."・非選択"  2."どちらも）。
+  static final RegExp _promptOptionPattern = RegExp(r'^\s*(❯\s*)?\d+[.)]\s');
+
+  /// Claude Code がユーザー入力待ち（選択/確認プロンプト表示中）か判定する。
+  /// 例: 権限確認・プラン承認・AskUserQuestion 等の番号付き選択メニュー。
+  /// 選択カーソル(❯ + 数字)があり、番号付き選択肢が 2 つ以上見えるときに真。
+  /// 通常の空の入力ボックス("│ > │")や素のシェルプロンプトには反応しない。
+  static bool _isClaudeAwaitingInput(Terminal terminal) {
+    final lines = terminal.buffer.lines;
+    final n = lines.length;
+    if (n == 0) return false;
+    final start = (n - 15).clamp(0, n);
+    var hasSelector = false;
+    var optionCount = 0;
+    for (var y = start; y < n; y++) {
+      final text = lines[y].getText();
+      if (_promptSelectorPattern.hasMatch(text)) hasSelector = true;
+      if (_promptOptionPattern.hasMatch(text)) optionCount++;
+    }
+    return hasSelector && optionCount >= 2;
+  }
+
+  /// 入力待ちプロンプトを検出したときに通知を送る。
+  /// 表示中セッションをフォアグラウンドで見ている場合は（画面で見えているので）
+  /// 送らない。tmux セッションでは通知からのインライン返信で回答も送れる。
+  void _sendAwaitingInputNotification() {
+    final host = _config?.host ?? 'server';
+    final sessions = ref.read(sessionManagerProvider).sessions;
+    final tabLabel = sessions
+        .where((s) => s.sessionId == arg)
+        .map((s) => s.label)
+        .firstOrNull;
+    final label = (tabLabel != null && tabLabel.trim().isNotEmpty)
+        ? tabLabel.trim()
+        : host;
+    final lang = _notificationLanguageCode();
+    final needs = lang == 'ja'
+        ? 'Claude が入力待ちです'
+        : lang == 'id'
+            ? 'Claude menunggu masukan Anda'
+            : 'Claude needs your input';
+    final canReply = _tmuxSessionName != null && _tmuxSessionName!.isNotEmpty;
+    final replyLabel = !canReply
+        ? null
+        : lang == 'ja'
+            ? '返信'
+            : lang == 'id'
+                ? 'Balas'
+                : 'Reply';
+    final replyHint = !canReply
+        ? null
+        : lang == 'ja'
+            ? 'Claude に回答を送信…'
+            : lang == 'id'
+                ? 'Kirim jawaban ke Claude…'
+                : 'Send an answer to Claude…';
+    NotificationService.instance.showCommandFinished(
+      sessionId: arg,
+      title: label,
+      summary: '$needs · $host',
+      preview: _terminalPreview(),
+      replyLabel: replyLabel,
+      replyHint: replyHint,
+    );
+  }
+
   /// 通知に載せる「Claude が最後に何をしたか」のプレビュー文字列を返す。
   /// 端末バッファ末尾の行を集め、UI 装飾を除いて意味のある数行を抽出する。
   String? _terminalPreview() {
@@ -997,6 +1083,7 @@ class TerminalConnectionNotifier
     // 再接続（新しいシェルセッション開始）時にも通知フラグをリセットしないと、
     // 以前のセッションで通知を送った後の再接続時に通知が送られなくなる。
     _notificationSent = false;
+    _awaitingInputNotified = false;
     state = state.copyWith(
       status: ConnectionStatus.connected,
       terminal: terminal,
@@ -1047,6 +1134,25 @@ class TerminalConnectionNotifier
         if (running) _claudeSeenRunningSinceIdle = true;
         if (running != state.claudeRunning) {
           state = state.copyWith(claudeRunning: running);
+        }
+
+        // 入力待ち（選択/確認プロンプト）に入った瞬間に 1 度だけ通知する。
+        // プロンプトが消えたらフラグを戻し、次のプロンプトで再び通知できる。
+        final awaiting = _isClaudeAwaitingInput(terminal);
+        if (awaiting) {
+          if (!_awaitingInputNotified) {
+            // 今まさに表示しているセッションをフォアグラウンドで見ているなら
+            // 画面で見えているので通知しない（フラグも立てず、別画面に移った
+            // ときに改めて通知できるようにする）。
+            final visibleAndForeground =
+                !_isAppInBackground && _visibleSessionId == arg;
+            if (!visibleAndForeground) {
+              _sendAwaitingInputNotification();
+              _awaitingInputNotified = true;
+            }
+          }
+        } else {
+          _awaitingInputNotified = false;
         }
       },
     );
