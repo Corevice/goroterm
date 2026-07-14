@@ -1,1 +1,1 @@
-• Baru: Anda kini mendapat notifikasi saat Claude Code menunggu masukan (prompt pilihan/konfirmasi). Di sesi tmux Anda bisa menjawab dari notifikasi.
+• Perbaikan (Mac): banner notifikasi kini muncul untuk tab/sesi latar saat aplikasi sedang fokus.
