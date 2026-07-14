@@ -1,1 +1,1 @@
-• Fix (desktop): explicitly request notification permission so notifications appear; added a "Test Notification" button in Settings.
+• New: you now get a notification when Claude Code is waiting for your input (selection/confirmation prompts). On tmux sessions you can answer from the notification.

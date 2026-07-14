@@ -1,1 +1,1 @@
-• Perbaikan (desktop): meminta izin notifikasi secara eksplisit; menambahkan tombol "Uji Notifikasi" di Pengaturan.
+• Baru: Anda kini mendapat notifikasi saat Claude Code menunggu masukan (prompt pilihan/konfirmasi). Di sesi tmux Anda bisa menjawab dari notifikasi.
