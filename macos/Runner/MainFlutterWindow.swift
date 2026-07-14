@@ -1,5 +1,26 @@
 import Cocoa
 import FlutterMacOS
+import UserNotifications
+
+/// flutter_local_notifications は各 Flutter エンジンのプラグイン登録時に
+/// UNUserNotificationCenter のデリゲートを自身へ無条件で差し替える。goroterm は
+/// tmux セッションごとに別エンジンのウィンドウを開くため、放置すると最後に
+/// 登録した/既に閉じた分離ウィンドウのプラグインがデリゲートに残り、前面表示
+/// (willPresent)が働かず別タブの通知がバナーで出なくなる。プラグイン登録の
+/// 直後にこれを呼び、デリゲートを常にメインエンジンのプラグインへ固定する。
+/// メインのプラグインは presentBanner=true を尊重して前面でもバナーを出し、
+/// 返信(text input)も native に処理する。
+func pinNotificationDelegate(captureMain: Bool) {
+  guard let appDelegate = NSApp.delegate as? AppDelegate else { return }
+  let center = UNUserNotificationCenter.current()
+  if captureMain, appDelegate.stableNotificationDelegate == nil {
+    // メイン登録直後: 現在のデリゲート(=メインエンジンのプラグイン)を捕捉。
+    appDelegate.stableNotificationDelegate = center.delegate
+  }
+  if let stable = appDelegate.stableNotificationDelegate {
+    center.delegate = stable
+  }
+}
 
 /// FlutterViewController に共通の MethodChannel 群を登録する。
 /// メインウィンドウと分離ウィンドウの両方で呼ばれる。
@@ -144,6 +165,9 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
     let controller = FlutterViewController(project: project)
     RegisterGeneratedPlugins(registry: controller)
     registerCommonChannels(controller: controller)
+    // 分離ウィンドウのプラグイン登録で奪われた通知デリゲートを、メイン
+    // エンジンのプラグインへ戻す（前面バナーを安定させる）。
+    pinNotificationDelegate(captureMain: false)
 
     let window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
@@ -315,6 +339,10 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     registerCommonChannels(controller: flutterViewController)
+
+    // メインエンジンのプラグインを捕捉し、通知デリゲートをそこに固定する
+    // （前面バナーの安定化）。
+    pinNotificationDelegate(captureMain: true)
 
     // メインウィンドウ(接続一覧 / 接続タブ)も tmux セッションウィンドウと
     // 同じ OS タブグループに参加させる。これで「接続」と各 tmux セッションが
