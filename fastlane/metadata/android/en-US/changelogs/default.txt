@@ -1,1 +1,1 @@
-• Fix (Mac): notification banners now appear for background tabs/sessions while the app is focused.
+• Fix: the tmux session list no longer flashes and disappears right after connecting (no more manual refresh needed).

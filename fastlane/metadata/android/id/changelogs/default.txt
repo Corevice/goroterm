@@ -1,1 +1,1 @@
-• Perbaikan (Mac): banner notifikasi kini muncul untuk tab/sesi latar saat aplikasi sedang fokus.
+• Perbaikan: daftar sesi tmux tidak lagi berkedip dan hilang tepat setelah terhubung (tidak perlu refresh manual).
