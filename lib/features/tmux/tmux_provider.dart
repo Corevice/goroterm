@@ -45,7 +45,12 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
         state = AsyncData(TmuxState(availability: availability));
         return;
       }
-      final sessions = await _fetchSessions(channelManager);
+      // リトライは「以前は一覧があったのに空が返った」＝接続直後の一時的な
+      // 空応答が疑われるときだけ。genuine empty（no server）は即時反映する。
+      final sessions = await _fetchSessionsResilient(
+        channelManager,
+        retryIfEmpty: prev?.sessions.isNotEmpty ?? false,
+      );
       if (_channelManager != channelManager) return; // stale
       state = AsyncData(TmuxState(availability: availability, sessions: sessions));
     } catch (e, st) {
@@ -78,6 +83,8 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       return TmuxState(availability: availability);
     }
 
+    // 初回ロード（前回状態なし）は genuine empty をそのまま表示する。
+    // フラッシュ（一覧あり→空）対策のリトライは _initializeState / refresh 側。
     final sessions = await _fetchSessions(channelManager);
     return TmuxState(availability: availability, sessions: sessions);
   }
@@ -94,7 +101,13 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     }
 
     try {
-      final sessions = await _fetchSessions(channelManager);
+      // 直前に一覧があったのに空が返った場合だけ、接続直後などの一時的な
+      // 空応答を疑って一度再取得する（既に空なら余計な待ちを入れない）。
+      final sessions = await _fetchSessionsResilient(
+        channelManager,
+        retryIfEmpty: current.sessions.isNotEmpty,
+      );
+      if (_channelManager != channelManager) return; // stale
       state = AsyncData(current.copyWith(sessions: sessions));
     } catch (_) {
       // エラーでも前回データを維持
@@ -109,7 +122,10 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       if (channelManager == null) return;
       final current = state.valueOrNull;
       if (current == null) return;
-      final sessions = await _fetchSessions(channelManager);
+      final sessions = await _fetchSessionsResilient(
+        channelManager,
+        retryIfEmpty: current.sessions.isNotEmpty,
+      );
       // stale check: 非同期待機中に channelManager が別インスタンスへ切り替わっていたら
       // 古い結果で新しい channelManager の state を上書きしない。
       if (_channelManager == channelManager) {
@@ -255,6 +271,21 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     } catch (_) {
       return const TmuxNotInstalled();
     }
+  }
+
+  /// セッション一覧を取得する。空が返っても [retryIfEmpty] が真なら一度だけ
+  /// 短時間後に再取得する。接続直後は tmux サーバへの exec が一時的に空応答を
+  /// 返すことがあり（その直後に手動 refresh すると出る）、良い一覧を空で
+  /// 上書きして「一瞬出て消える」原因になっていたため、それを防ぐ。
+  Future<List<TmuxSession>> _fetchSessionsResilient(
+    SshChannelManager channelManager, {
+    required bool retryIfEmpty,
+  }) async {
+    final sessions = await _fetchSessions(channelManager);
+    if (sessions.isNotEmpty || !retryIfEmpty) return sessions;
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (_channelManager != channelManager) return sessions; // stale
+    return _fetchSessions(channelManager);
   }
 
   Future<List<TmuxSession>> _fetchSessions(

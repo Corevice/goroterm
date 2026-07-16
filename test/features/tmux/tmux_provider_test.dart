@@ -2313,4 +2313,63 @@ void main() {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // Resilient fetch — transient empty must not clear a populated list (flash fix)
+  // ---------------------------------------------------------------------------
+  group('resilient fetch retries a transient empty result', () {
+    test('refresh keeps sessions when one fetch transiently returns empty',
+        () async {
+      const sep = '|||';
+      final m = _MockSshChannelManager();
+      final cmdV = _makeSession(exitCode: 0);
+      final version =
+          _makeSession(stdout: utf8.encode('tmux 3.3a\n'), exitCode: null);
+      _MockSSHSession withSessions() => _makeSession(
+            stdout: utf8.encode('work${sep}2${sep}1${sep}1700000000\n'),
+            exitCode: 0,
+          );
+      _MockSSHSession noServer() => _makeSession(
+            stderr: utf8.encode('no server running on /tmp/tmux\n'),
+            exitCode: 1,
+          );
+
+      var listCalls = 0;
+      when(() => m.executeCommand(any())).thenAnswer((inv) async {
+        final cmd = inv.positionalArguments[0] as String;
+        if (cmd.contains('command -v')) return cmdV;
+        if (cmd.contains('tmux -V')) return version;
+        if (cmd.contains('list-sessions')) {
+          listCalls++;
+          // 1st (init) → sessions, 2nd (refresh) → transient empty,
+          // 3rd (retry) → sessions again.
+          return listCalls == 2 ? noServer() : withSessions();
+        }
+        return _makeSession(exitCode: 0); // list-panes / capture-pane / set-option
+      });
+
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(tmuxProvider('flash-test').notifier);
+      notifier.setChannelManager(m);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
+      expect(
+        container.read(tmuxProvider('flash-test')).valueOrNull?.sessions.length,
+        1,
+        reason: 'initial fetch should populate the list',
+      );
+
+      // The refresh fetch returns empty once; the resilient retry must recover
+      // the list instead of leaving it cleared.
+      await notifier.refresh();
+      expect(
+        container.read(tmuxProvider('flash-test')).valueOrNull?.sessions.length,
+        1,
+        reason: 'a transient empty result must not clear a populated list',
+      );
+      expect(listCalls, greaterThanOrEqualTo(3),
+          reason: 'the empty result should have triggered one retry');
+    });
+  });
+
 }
