@@ -29,13 +29,13 @@ class _FakeTmuxNotifier extends TmuxNotifier {
   Future<void> refresh() async {}
 
   @override
-  Future<void> createSession(String name) async {}
+  Future<bool> createSession(String name) async => true;
 
   @override
-  Future<void> killSession(String name) async {}
+  Future<bool> killSession(String name) async => true;
 
   @override
-  Future<void> renameSession(String oldName, String newName) async {}
+  Future<bool> renameSession(String oldName, String newName) async => true;
 
   @override
   void attachSession(String name) {}

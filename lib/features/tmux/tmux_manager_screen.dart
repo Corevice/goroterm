@@ -6,6 +6,17 @@ import '../../core/error/app_error.dart';
 import 'tmux_provider.dart';
 import 'tmux_session_model.dart';
 
+/// Shown when a tmux operation (create/kill/rename session) was rejected
+/// because another one was already in progress (TmuxNotifier's exclusive
+/// _isOperating guard). Without this the button just silently does nothing,
+/// which — combined with a slow/hung SSH channel — looks like the button is
+/// dead rather than merely busy.
+void _showOperationInProgressSnackBar(BuildContext context) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(AppLocalizations.of(context).tmuxOperationInProgress)),
+  );
+}
+
 class TmuxManagerScreen extends ConsumerStatefulWidget {
   const TmuxManagerScreen({
     super.key,
@@ -53,9 +64,12 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
   Future<void> _createSession(String name) async {
     if (!mounted) return;
     try {
-      await ref
+      final ran = await ref
           .read(tmuxProvider(widget.connectionId).notifier)
           .createSession(name);
+      if (!ran && mounted) {
+        _showOperationInProgressSnackBar(context);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -251,8 +265,8 @@ class _SessionListView extends StatefulWidget {
   final Future<void> Function() onRefresh;
   final void Function(String name) onAttach;
   final VoidCallback? onOpenAll;
-  final Future<void> Function(String name) onDelete;
-  final Future<void> Function(String oldName, String newName) onRename;
+  final Future<bool> Function(String name) onDelete;
+  final Future<bool> Function(String oldName, String newName) onRename;
 
   @override
   State<_SessionListView> createState() => _SessionListViewState();
@@ -376,7 +390,10 @@ class _SessionListViewState extends State<_SessionListView> {
     );
     if (confirmed == true && mounted) {
       try {
-        await widget.onDelete(name);
+        final ran = await widget.onDelete(name);
+        if (!ran && mounted) {
+          _showOperationInProgressSnackBar(context);
+        }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -465,7 +482,10 @@ class _SessionListViewState extends State<_SessionListView> {
   Future<void> _doRename(String oldName, String newName) async {
     if (!mounted) return;
     try {
-      await widget.onRename(oldName, newName);
+      final ran = await widget.onRename(oldName, newName);
+      if (!ran && mounted) {
+        _showOperationInProgressSnackBar(context);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

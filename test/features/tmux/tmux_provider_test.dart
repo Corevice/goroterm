@@ -1755,28 +1755,36 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
-  // setChannelManager() while _isOperating == true — Phase 54
+  // setChannelManager() while _isOperating == true — Phase 54, REVISED
+  // 2026-08-31 (tmux latch-stuck fix).
   //
-  // When setChannelManager(m2) is called while createSession / killSession /
-  // renameSession is in flight (_isOperating == true), _initializeState(m2)
-  // must NOT be triggered.  The new manager is stored but initialisation is
-  // deferred: after the operation completes its finally-block resets
-  // _isOperating and calls _safeRefresh(), which uses the new manager.
+  // The old behaviour tested here (setChannelManager skips _initializeState
+  // while _isOperating == true, deferring init until the in-flight operation's
+  // finally block runs) was itself the root cause of a real bug: if the
+  // in-flight operation's `channelManager.executeCommand()` await never
+  // resolves (a half-open SSH connection after the app sits idle — dartssh2
+  // waits forever for a channel-open ack with no timeout), _isOperating
+  // latches forever and reconnecting (setChannelManager with a fresh,
+  // healthy channelManager) could never re-initialize state either. Only an
+  // app restart recovered.
   //
-  // Observable invariant:
-  //   • During the operation window: state still reflects m1 (no 'work' yet).
-  //   • After the operation: _safeRefresh(m2) updates sessions to 'work'.
-  //   • Availability from m1's _initializeState is preserved via copyWith.
+  // The fix: setChannelManager() now unconditionally resets _isOperating
+  // before deciding whether to call _initializeState. The old connection's
+  // operation, if it ever does complete, still runs its finally block
+  // harmlessly (resets an already-false _isOperating, calls _safeRefresh()
+  // which reads the CURRENT channelManager and _safeRefresh's own staleness
+  // guard prevents it from clobbering anything).
   // ---------------------------------------------------------------------------
 
-  group('setChannelManager() while _isOperating skips _initializeState', () {
+  group('setChannelManager() resets a stuck _isOperating latch', () {
     setUpAll(() {
       registerFallbackValue('');
     });
 
     test(
-        'setChannelManager during createSession does not trigger '
-        '_initializeState; _safeRefresh picks up new manager after op',
+        'setChannelManager during createSession resets _isOperating and '
+        'triggers _initializeState immediately, without waiting for the '
+        'stuck operation to finish',
         () async {
       final container = ProviderContainer();
       addTearDown(container.dispose);
@@ -1806,7 +1814,9 @@ void main() {
         if (cmd.contains('tmux -V')) return Future.value(m1Ver);
         if (cmd.contains('list-sessions')) return Future.value(m1InitList);
         if (cmd.contains('new-session')) {
-          // Block until explicitly released — holds _isOperating == true.
+          // Block until explicitly released — simulates a hung SSH channel
+          // (e.g. executeCommand's channel-open never gets an ack) that
+          // holds _isOperating == true indefinitely.
           return newSessionCompleter.future;
         }
         // set-option and any other commands succeed immediately.
@@ -1829,50 +1839,44 @@ void main() {
         reason: 'setup: m1 _initializeState must populate init-session',
       );
 
-      // 2. Start createSession — new-session command blocks on the Completer.
-      //    _isOperating is now true (inside the try block).
+      // 2. Start createSession — new-session command blocks on the Completer,
+      //    simulating a permanently hung SSH channel. _isOperating is now
+      //    true (inside the try block) and, without the fix, would stay true
+      //    forever since nothing ever completes the Completer.
       final createFuture = notifier.createSession('blocked-session');
       // Give the async machinery enough time to reach the awaiting point.
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      // 3. Replace channelManager with m2 while _isOperating == true.
-      //    _initializeState(m2) must NOT be called.
+      // 3. Replace channelManager with m2 while _isOperating == true (m1's
+      //    operation is still stuck and never will complete on its own).
       notifier.setChannelManager(m2);
-
-      // 4. Wait long enough for _initializeState(m2) to have completed IF
-      //    it were incorrectly triggered (m2 is instantaneous).
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
-      // 'work' must NOT appear yet — _initializeState(m2) was skipped.
-      final stateDuringOp = container.read(tmuxProvider('oi-1'));
+      // 4. _initializeState(m2) must have run RIGHT AWAY — the latch reset
+      //    in setChannelManager must not wait for m1's stuck operation.
+      final stateAfterSwap = container.read(tmuxProvider('oi-1'));
       expect(
-        stateDuringOp.value?.sessions.map((s) => s.name),
-        isNot(contains('work')),
+        stateAfterSwap.value?.sessions.map((s) => s.name),
+        contains('work'),
         reason:
-            '_initializeState(m2) must not run while _isOperating == true',
-      );
-      expect(
-        stateDuringOp.value?.sessions.map((s) => s.name),
-        contains('init-session'),
-        reason: 'state must still reflect m1 init result during the lock',
+            'setChannelManager must reset the stuck latch and reinitialize '
+            'against m2 immediately, not defer until m1 unblocks',
       );
 
-      // 5. Release the blocked new-session.
-      //    createSession finally: _isOperating = false → _safeRefresh(m2).
+      // 5. Eventually the stuck m1 operation is released (in reality this
+      //    might never happen; here we release it to confirm its finally
+      //    block running late is harmless).
       newSessionCompleter.complete(m1NewSession);
-      await createFuture; // _safeRefresh is awaited inside createSession
+      await createFuture;
 
-      // 6. _safeRefresh(m2) must have updated sessions to 'work'.
+      // 6. _safeRefresh() reads the CURRENT channelManager (m2) — state must
+      //    still reflect m2, not be clobbered by the stale m1 operation.
       final finalState = container.read(tmuxProvider('oi-1'));
       expect(
         finalState.value?.sessions.map((s) => s.name),
         contains('work'),
-        reason: '_safeRefresh must use m2 channelManager after operation',
-      );
-      expect(
-        finalState.value?.isAvailable,
-        isTrue,
-        reason: 'TmuxAvailable from m1 _initializeState must be preserved',
+        reason:
+            'the stale operation completing late must not overwrite m2 state',
       );
       expect(finalState, isA<AsyncData<TmuxState>>());
     });
@@ -2369,6 +2373,203 @@ void main() {
       );
       expect(listCalls, greaterThanOrEqualTo(3),
           reason: 'the empty result should have triggered one retry');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Channel-open timeout releases a stuck _isOperating latch
+  // (2026-08-31 tmux latch-stuck fix)
+  //
+  // Root cause: `channelManager.executeCommand(command)` inside _runCommand()
+  // had no timeout of its own — only the subsequent stdout/stderr read did.
+  // dartssh2 waits forever for a channel-open acknowledgement, so a half-open
+  // SSH connection (e.g. the app sat idle and a NAT/router silently dropped
+  // the TCP session) left createSession/killSession/renameSession's
+  // executeCommand() await pending indefinitely. Since _runExclusive's
+  // `finally` (which resets _isOperating) never ran, the "Sessions" panel's
+  // buttons went permanently unresponsive until the app was restarted.
+  //
+  // The fix wraps channelManager.executeCommand() in a bounded
+  // (_channelOpenTimeout, 10 s) budget via _openExecChannel(), so the await
+  // always eventually throws TimeoutException instead of hanging forever,
+  // letting _runExclusive's finally block run and release the latch.
+  // ---------------------------------------------------------------------------
+
+  group('_runCommand() channel-open timeout releases the exclusive-operation latch', () {
+    setUpAll(() {
+      registerFallbackValue('');
+    });
+
+    test(
+        'createSession times out when executeCommand never resolves, and a '
+        'subsequent createSession is not blocked by a stuck _isOperating',
+        () {
+      fakeAsync((async) {
+        // IMPORTANT: the Completer that will later be completed from inside
+        // this fakeAsync block must also be *constructed* inside it. A Dart
+        // Future binds the zone used to schedule its completion callbacks at
+        // construction time, not at .then()/.complete() time — a Completer
+        // built in the real (outer) zone delivers its completion via the
+        // real event loop's microtask queue, which fakeAsync's
+        // flushMicrotasks() cannot see or drain, so the assertions below
+        // would observe it one real async gap too late (i.e. never, within
+        // this synchronous test body).
+        final cmdV = _makeSession(exitCode: 0);
+        final version =
+            _makeSession(stdout: utf8.encode('tmux 3.3a\n'), exitCode: null);
+        final noServerList = _makeSession(
+          exitCode: 1,
+          stderr: utf8.encode('no server running on /tmp/tmux\n'),
+        );
+
+        // First createSession's new-session command hangs forever —
+        // simulates a half-open SSH connection where the channel-open ack
+        // never arrives.
+        final hangingCompleter = Completer<SSHSession>();
+        // Second createSession's new-session command succeeds normally.
+        final secondNewSession = _makeSession(exitCode: 0);
+        final noop = _makeSession(exitCode: 0);
+
+        var newSessionCalls = 0;
+        final m = _MockSshChannelManager();
+        when(() => m.executeCommand(any())).thenAnswer((inv) {
+          final cmd = inv.positionalArguments[0] as String;
+          if (cmd.contains('command -v')) return Future.value(cmdV);
+          if (cmd.contains('tmux -V')) return Future.value(version);
+          if (cmd.contains('list-sessions')) return Future.value(noServerList);
+          if (cmd.contains('new-session')) {
+            newSessionCalls++;
+            return newSessionCalls == 1
+                ? hangingCompleter.future
+                : Future.value(secondNewSession);
+          }
+          return Future.value(noop);
+        });
+
+        final container = ProviderContainer();
+
+        container.read(tmuxProvider('timeout-latch'));
+        async.flushMicrotasks();
+        final notifier =
+            container.read(tmuxProvider('timeout-latch').notifier);
+        notifier.setChannelManager(m);
+        async.flushMicrotasks();
+
+        // Kick off createSession — its new-session executeCommand() hangs.
+        Object? caughtError;
+        unawaited(notifier.createSession('stuck').catchError((e) {
+          caughtError = e;
+          return false;
+        }));
+        async.flushMicrotasks();
+
+        // Advance past the 10-second channel-open timeout budget.
+        async.elapse(const Duration(seconds: 10));
+        async.flushMicrotasks();
+
+        expect(
+          caughtError,
+          isA<TimeoutException>(),
+          reason: 'the hung executeCommand() await must time out instead of '
+              'blocking createSession forever',
+        );
+
+        // The finally block must have reset _isOperating — a second
+        // createSession must actually execute its own new-session command,
+        // not be silently dropped by a still-stuck latch.
+        bool? ranSecond;
+        notifier.createSession('second').then((ran) => ranSecond = ran);
+        async.flushMicrotasks();
+
+        expect(
+          ranSecond,
+          isTrue,
+          reason: '_isOperating must have been released by the timeout so '
+              'the second call actually runs',
+        );
+        expect(newSessionCalls, 2);
+
+        // The first (abandoned) exec channel must not leak: if it arrives
+        // late — after we already gave up on it — _openExecChannel() must
+        // close it immediately since nothing else will ever read from it.
+        final lateArrival = _makeSession(exitCode: 0);
+        hangingCompleter.complete(lateArrival);
+        async.flushMicrotasks();
+        verify(() => lateArrival.close()).called(greaterThanOrEqualTo(1));
+
+        container.dispose();
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // _runExclusive() surfaces "not executed" to the caller
+  // (2026-08-31 tmux latch-stuck fix, UI-visibility half)
+  //
+  // Before this fix, createSession/killSession/renameSession returned
+  // Future<void>, so a call rejected by the exclusive-operation guard
+  // (_isOperating already true) looked identical — from the caller's point
+  // of view — to one that ran and quietly succeeded. Combined with a slow or
+  // hung operation, this made the "Sessions" panel's buttons look dead
+  // rather than merely busy. They now return Future<bool>: false means the
+  // call was a no-op.
+  // ---------------------------------------------------------------------------
+
+  group('_runExclusive() returns whether the operation actually ran', () {
+    setUpAll(() {
+      registerFallbackValue('');
+    });
+
+    test(
+        'a second createSession call while one is in flight returns false '
+        'without issuing its own command',
+        () async {
+      final blockCompleter = Completer<SSHSession>();
+      final cmdV = _makeSession(exitCode: 0);
+      final version =
+          _makeSession(stdout: utf8.encode('tmux 3.3a\n'), exitCode: null);
+      final noServerList = _makeSession(
+        exitCode: 1,
+        stderr: utf8.encode('no server running on /tmp/tmux\n'),
+      );
+      var newSessionCalls = 0;
+
+      final m = _MockSshChannelManager();
+      when(() => m.executeCommand(any())).thenAnswer((inv) {
+        final cmd = inv.positionalArguments[0] as String;
+        if (cmd.contains('command -v')) return Future.value(cmdV);
+        if (cmd.contains('tmux -V')) return Future.value(version);
+        if (cmd.contains('list-sessions')) return Future.value(noServerList);
+        if (cmd.contains('new-session')) {
+          newSessionCalls++;
+          return blockCompleter.future;
+        }
+        return Future.value(_makeSession(exitCode: 0));
+      });
+
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      await container.read(tmuxProvider('exclusive-1').future);
+      final notifier = container.read(tmuxProvider('exclusive-1').notifier);
+      notifier.setChannelManager(m);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      // First call blocks on its new-session command — _isOperating == true.
+      final first = notifier.createSession('first');
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Second call must be rejected (false) without issuing its own
+      // new-session command — the exclusive guard's outcome must be visible
+      // to the caller, not just silently swallowed.
+      final ranSecond = await notifier.createSession('second');
+      expect(ranSecond, isFalse);
+      expect(newSessionCalls, 1,
+          reason: 'the second call must not have executed a command');
+
+      // Release the first call so the test tears down cleanly.
+      blockCompleter.complete(_makeSession(exitCode: 0));
+      expect(await first, isTrue,
+          reason: 'the first call did run and must report so');
     });
   });
 

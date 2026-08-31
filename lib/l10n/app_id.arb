@@ -132,6 +132,7 @@
   "failedToKillSession": "Gagal mengakhiri sesi: {error}",
   "renameSessionTitle": "Ganti Nama Sesi",
   "failedToRenameSession": "Gagal mengganti nama sesi: {error}",
+  "tmuxOperationInProgress": "Operasi tmux lain sedang berlangsung. Silakan coba lagi.",
   "openAllSessions": "Buka semua {count} sesi",
   "selectSessions": "Pilih",
   "openSelectedSessions": "Buka {count} terpilih",

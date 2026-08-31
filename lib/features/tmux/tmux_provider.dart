@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -24,9 +25,19 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
   void setChannelManager(SshChannelManager? channelManager) {
     if (_channelManager == channelManager) return;
     _channelManager = channelManager;
-    if (channelManager != null && !_isOperating) {
+    // Reset the exclusive-operation latch whenever the channelManager is
+    // replaced. _isOperating is scoped to whichever connection started the
+    // in-flight operation; once that connection is gone, the operation can
+    // no longer make progress against it and must not keep blocking
+    // _initializeState (or any new operation) on the new connection.
+    // If the stale operation's `finally` block later runs anyway (the
+    // channel-open timeout in _runCommand guarantees it eventually will),
+    // it just resets _isOperating again — harmless — and _safeRefresh()'s
+    // own staleness check prevents it from clobbering newer state.
+    _isOperating = false;
+    if (channelManager != null) {
       _initializeState(channelManager);
-    } else if (channelManager == null) {
+    } else {
       state = const AsyncData(TmuxState(availability: TmuxNotInstalled()));
     }
   }
@@ -136,7 +147,10 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     }
   }
 
-  Future<void> createSession(String name) => _runExclusive(() async {
+  /// Returns `true` if the session was actually created (i.e. no other
+  /// exclusive tmux operation was in progress), `false` if this call was a
+  /// no-op because [_isOperating] was already held.
+  Future<bool> createSession(String name) => _runExclusive(() async {
         final channelManager = _channelManager;
         if (channelManager == null) return;
         final escaped = shellQuote(name);
@@ -148,7 +162,8 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
         ).catchError((_) {});
       });
 
-  Future<void> killSession(String name) => _runExclusive(
+  /// See [createSession] for the meaning of the returned bool.
+  Future<bool> killSession(String name) => _runExclusive(
         () async {
           final channelManager = _channelManager;
           if (channelManager == null) return;
@@ -158,7 +173,8 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
         swallowErrors: true, // セッション不在等は正常扱い
       );
 
-  Future<void> renameSession(String oldName, String newName) => _runExclusive(
+  /// See [createSession] for the meaning of the returned bool.
+  Future<bool> renameSession(String oldName, String newName) => _runExclusive(
         () async {
           final channelManager = _channelManager;
           if (channelManager == null) return;
@@ -173,14 +189,16 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       );
 
   /// Runs [operation] exclusively under the [_isOperating] guard.
-  /// Returns early (no-op) if another operation is already in progress.
-  /// If [swallowErrors] is true, exceptions from [operation] are silently
-  /// discarded; otherwise they propagate to the caller.
-  Future<void> _runExclusive(
+  /// Returns `false` early (no-op) if another operation is already in
+  /// progress; returns `true` once [operation] has actually run (whether it
+  /// succeeded or, with [swallowErrors], failed silently). If [operation]
+  /// throws and [swallowErrors] is false, the exception propagates instead
+  /// of a return value.
+  Future<bool> _runExclusive(
     Future<void> Function() operation, {
     bool swallowErrors = false,
   }) async {
-    if (_isOperating) return;
+    if (_isOperating) return false;
     _isOperating = true;
     try {
       await operation();
@@ -190,6 +208,7 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       _isOperating = false;
       await _safeRefresh();
     }
+    return true;
   }
 
   /// Attaches to a session by writing the command to the PTY channel.
@@ -420,15 +439,65 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
   static final RegExp _spinnerVerbPattern =
       RegExp(r'\w+(ing|ed)\s*[…\.]');
 
+  /// Budget for opening the exec channel itself (channelManager.executeCommand),
+  /// kept separate from the stdout/stderr-read [timeout] passed to _runCommand.
+  ///
+  /// Opening a channel is a single round-trip once the underlying SSH
+  /// transport is healthy, so a fixed short budget is appropriate regardless
+  /// of how large the caller's read [timeout] is — unlike a command's output,
+  /// whose size can genuinely vary. Without this, a half-open connection
+  /// (e.g. the app was idle and the NAT/router silently dropped the TCP
+  /// session) leaves dartssh2 waiting forever for a channel-open
+  /// acknowledgement that will never arrive, which never surfaces as a
+  /// TimeoutException and permanently latches _isOperating (see
+  /// setChannelManager's fix for the same root cause on reconnect).
+  static const _channelOpenTimeout = Duration(seconds: 10);
+
+  /// Opens an exec channel for [command], bounded by [_channelOpenTimeout].
+  ///
+  /// Future.timeout() does not cancel the original future — if the channel
+  /// eventually opens after we've already given up on it, we must close it
+  /// ourselves here, otherwise it leaks (nobody else holds a reference to
+  /// read from or close it).
+  Future<SSHSession> _openExecChannel(
+    SshChannelManager channelManager,
+    String command,
+  ) {
+    var timedOut = false;
+    final future = channelManager.executeCommand(command);
+    unawaited(future.then((session) {
+      if (timedOut) {
+        // Late arrival after we already gave up — close it immediately so
+        // the channel doesn't sit open forever with nothing reading it.
+        try {
+          session.close();
+        } catch (_) {}
+      }
+    }, onError: (_) {
+      // The timeout path below already produced a TimeoutException for the
+      // caller; a late connection error here has nowhere useful to go.
+    }));
+    return future.timeout(_channelOpenTimeout, onTimeout: () {
+      timedOut = true;
+      throw TimeoutException(
+        'SSH exec channel did not open within $_channelOpenTimeout',
+        _channelOpenTimeout,
+      );
+    });
+  }
+
   /// Runs a command via exec channel and collects stdout, stderr, and exit code.
-  /// Throws [TimeoutException] if the command does not complete within [timeout].
-  /// The SSH exec channel is always closed in a finally block (even on timeout).
+  /// Throws [TimeoutException] if the channel does not open within
+  /// [_channelOpenTimeout], or if it opens but does not complete within
+  /// [timeout]. The SSH exec channel is always closed in a finally block
+  /// (even on timeout), except in the channel-open-timeout case where there
+  /// is no session yet — see [_openExecChannel] for how that leak is avoided.
   Future<(String output, String error, int? exitCode)> _runCommand(
     SshChannelManager channelManager,
     String command, {
     Duration timeout = const Duration(seconds: 15),
   }) async {
-    final session = await channelManager.executeCommand(command);
+    final session = await _openExecChannel(channelManager, command);
     try {
       // Collect stdout and stderr in parallel to avoid serial timeout accumulation.
       // cast<List<int>>() is required because Stream<Uint8List> is not a subtype

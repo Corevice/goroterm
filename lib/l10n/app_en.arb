@@ -160,6 +160,7 @@
   "renameSessionTitle": "Rename Session",
   "failedToRenameSession": "Failed to rename session: {error}",
   "@failedToRenameSession": { "placeholders": { "error": { "type": "String" } } },
+  "tmuxOperationInProgress": "Another tmux operation is already in progress. Please try again.",
   "openAllSessions": "Open all {count} sessions",
   "@openAllSessions": { "placeholders": { "count": { "type": "int" } } },
   "selectSessions": "Select",
