@@ -71,3 +71,6 @@ fastlane/test_output
 *.mobileprovision
 *.p8
 google-play-service-account.json
+# Generated localizations (flutter gen-l10n output; CI uses the synthetic
+# flutter_gen package, newer local Flutter versions generate these into lib/).
+/lib/l10n/app_localizations*.dart
