@@ -95,50 +95,58 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
                 onRetry: () =>
                     ref.invalidate(tmuxProvider(widget.connectionId)),
               ),
-              data: (state) => state.availability is TmuxUnknown
-                  ? _AvailabilityUnknownView(
-                      onRetry: () =>
-                          ref.invalidate(tmuxProvider(widget.connectionId)),
-                    )
-                  : !state.isAvailable
-                      ? _NotInstalledView(
-                          onRetry: () => ref
-                              .invalidate(tmuxProvider(widget.connectionId)),
-                        )
-                      : _SessionListView(
-                          state: state,
-                          canOpenAll: widget.onAttachSession != null,
-                          onRefresh: () => ref
-                              .read(tmuxProvider(widget.connectionId).notifier)
-                              .refresh(),
-                          onAttach: (name) {
-                            if (widget.onAttachSession != null) {
-                              widget.onAttachSession!(name);
-                            } else {
-                              ref
-                                  .read(tmuxProvider(widget.connectionId)
-                                      .notifier)
-                                  .attachSession(name);
-                            }
-                          },
-                          onOpenAll: widget.onAttachSession != null
-                              ? () {
-                                  for (final s in state.sessions) {
-                                    widget.onAttachSession!(s.name);
-                                  }
-                                }
-                              : null,
-                          onDelete: (name) => ref
-                              .read(tmuxProvider(widget.connectionId).notifier)
-                              .killSession(name),
-                          onRename: (oldName, newName) => ref
-                              .read(tmuxProvider(widget.connectionId).notifier)
-                              .renameSession(oldName, newName),
-                        ),
+              data: (state) => _buildAvailabilityBody(state),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  /// Renders the drawer body for the resolved [TmuxState.availability]:
+  /// not-yet-connected (no attempt made) → unknown (attempted, inconclusive)
+  /// → not installed (confirmed) → the session list.
+  Widget _buildAvailabilityBody(TmuxState state) {
+    if (state.availability is TmuxNotConnected) {
+      return const _NotConnectedView();
+    }
+    if (state.availability is TmuxUnknown) {
+      return _AvailabilityUnknownView(
+        onRetry: () => ref.invalidate(tmuxProvider(widget.connectionId)),
+      );
+    }
+    if (!state.isAvailable) {
+      return _NotInstalledView(
+        onRetry: () => ref.invalidate(tmuxProvider(widget.connectionId)),
+      );
+    }
+    return _SessionListView(
+      state: state,
+      canOpenAll: widget.onAttachSession != null,
+      onRefresh: () =>
+          ref.read(tmuxProvider(widget.connectionId).notifier).refresh(),
+      onAttach: (name) {
+        if (widget.onAttachSession != null) {
+          widget.onAttachSession!(name);
+        } else {
+          ref
+              .read(tmuxProvider(widget.connectionId).notifier)
+              .attachSession(name);
+        }
+      },
+      onOpenAll: widget.onAttachSession != null
+          ? () {
+              for (final s in state.sessions) {
+                widget.onAttachSession!(s.name);
+              }
+            }
+          : null,
+      onDelete: (name) => ref
+          .read(tmuxProvider(widget.connectionId).notifier)
+          .killSession(name),
+      onRename: (oldName, newName) => ref
+          .read(tmuxProvider(widget.connectionId).notifier)
+          .renameSession(oldName, newName),
     );
   }
 
@@ -798,6 +806,52 @@ class _InstallCommand extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+/// Shown when the SSH connection hasn't been established yet (TmuxNotConnected)
+/// — no channelManager exists yet, so no attempt to check tmux has even been
+/// made. Deliberately distinct from [_AvailabilityUnknownView]: that view's
+/// "couldn't check" copy implies a check was attempted and failed, which
+/// would be inaccurate here and would needlessly alarm a user who simply
+/// opened the drawer before the connection settled. This view offers no
+/// retry action — it resolves on its own once the connection is ready.
+class _NotConnectedView extends StatelessWidget {
+  const _NotConnectedView();
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+            width: 32,
+            height: 32,
+            child: CircularProgressIndicator(strokeWidth: 3),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            l.tmuxWaitingForConnection,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            l.tmuxWaitingForConnectionDescription,
+            style: const TextStyle(color: Colors.grey),
+            textAlign: TextAlign.center,
           ),
         ],
       ),

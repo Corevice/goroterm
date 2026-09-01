@@ -71,6 +71,18 @@ class TmuxUnknown extends TmuxAvailability {
   const TmuxUnknown();
 }
 
+/// SSH 接続がまだ確立しておらず、tmux の有無をチェックする土台
+/// (channelManager) 自体がまだ無い状態。
+///
+/// [TmuxUnknown]（チェックを試みたが判定できなかった）ともさらに区別する:
+/// こちらはチェックをまだ一度も試みていない。`TmuxNotInstalled` で表現す
+/// ると、接続確立前に tmux Sessions ドロワーを開いた利用者へ「tmux がイン
+/// ストールされていません」という誤った案内（apt/brew の手順つき）を一瞬
+/// 見せてしまう — 実際にはインストール済みのサーバーであっても、である。
+class TmuxNotConnected extends TmuxAvailability {
+  const TmuxNotConnected();
+}
+
 /// Combined state returned by [TmuxNotifier].
 class TmuxState {
   const TmuxState({

@@ -38,7 +38,9 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     if (channelManager != null) {
       _initializeState(channelManager);
     } else {
-      state = const AsyncData(TmuxState(availability: TmuxNotInstalled()));
+      // No SSH channel to check tmux with (e.g. disconnected) — this is not
+      // the same as "confirmed not installed"; see TmuxNotConnected.
+      state = const AsyncData(TmuxState(availability: TmuxNotConnected()));
     }
   }
 
@@ -96,7 +98,12 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     });
     final channelManager = _channelManager;
     if (channelManager == null) {
-      return const TmuxState(availability: TmuxNotInstalled());
+      // Nothing to check tmux with yet — SSH hasn't connected (or hasn't
+      // been wired up to this notifier) at all. This is not the same claim
+      // as "confirmed not installed": that would tell a user who opens the
+      // tmux drawer before the connection settles that tmux is missing
+      // (with install instructions) even on a server where it is present.
+      return const TmuxState(availability: TmuxNotConnected());
     }
 
     final availability = await _checkAvailabilityResilient(channelManager);

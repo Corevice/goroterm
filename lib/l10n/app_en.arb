@@ -169,6 +169,8 @@
   "tmuxNotInstalled": "tmux is not installed",
   "tmuxAvailabilityUnknown": "Couldn't check tmux status",
   "tmuxAvailabilityUnknownDescription": "Check your connection and try again.",
+  "tmuxWaitingForConnection": "Waiting for connection…",
+  "tmuxWaitingForConnectionDescription": "tmux status will be checked once the connection is ready.",
   "installTmuxOnServer": "Install tmux on your server:",
   "distroDebianUbuntu": "Debian/Ubuntu",
   "distroMacOS": "macOS",

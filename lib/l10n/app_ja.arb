@@ -139,6 +139,8 @@
   "tmuxNotInstalled": "tmux がインストールされていません",
   "tmuxAvailabilityUnknown": "tmux の状態を確認できませんでした",
   "tmuxAvailabilityUnknownDescription": "接続を確認してもう一度お試しください。",
+  "tmuxWaitingForConnection": "接続待機中…",
+  "tmuxWaitingForConnectionDescription": "接続が確立され次第、tmux の状態を確認します。",
   "installTmuxOnServer": "サーバーに tmux をインストールしてください:",
   "distroDebianUbuntu": "Debian/Ubuntu",
   "distroMacOS": "macOS",

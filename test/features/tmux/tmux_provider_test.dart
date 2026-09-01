@@ -561,17 +561,63 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('TmuxNotifier channelManager injection', () {
-    test('initial state with null channelManager returns notAvailable', () async {
+    test(
+        'initial state with null channelManager returns TmuxNotConnected '
+        '(not TmuxNotInstalled)', () async {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
-      // build() with _channelManager == null returns TmuxState(notInstalled).
+      // build() with _channelManager == null means the SSH connection hasn't
+      // been wired up yet, so no check was even attempted. That must not be
+      // reported as "confirmed not installed" (TmuxNotInstalled) — see
+      // TmuxNotConnected.
       await container.read(tmuxProvider('conn-1').future);
       final state = container.read(tmuxProvider('conn-1'));
 
       expect(state, isA<AsyncData<TmuxState>>());
+      expect(state.value?.availability, isA<TmuxNotConnected>());
+      expect(state.value?.availability, isNot(isA<TmuxNotInstalled>()));
       expect(state.value?.isAvailable, isFalse);
       expect(state.value?.sessions, isEmpty);
+    });
+
+    // Regression guard for the "not connected" / "not installed" conflation
+    // that build() and setChannelManager(null) both used to have (the same
+    // class of bug 49373bb fixed one level down, for a transient
+    // _checkAvailability failure vs. a confirmed absence). Covers both
+    // places that report "no channelManager": build()'s default and
+    // setChannelManager(null) after the connection drops.
+    test(
+        'null channelManager never reports TmuxNotInstalled, whether from '
+        'the initial build() or from a later setChannelManager(null)',
+        () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      // 1. build()'s own default, before any channelManager was ever set.
+      await container.read(tmuxProvider('never-connected').future);
+      expect(
+        container.read(tmuxProvider('never-connected')).value?.availability,
+        isNot(isA<TmuxNotInstalled>()),
+        reason: 'never having connected must not be reported as tmux being '
+            'confirmed absent',
+      );
+
+      // 2. setChannelManager(null) after a connection drops — even if tmux
+      // had previously been confirmed available, losing the connection is
+      // not a new "not installed" determination.
+      final notifier =
+          container.read(tmuxProvider('never-connected').notifier);
+      notifier.setStateForTesting(
+        const TmuxState(availability: TmuxAvailable(version: 'tmux 3.3a')),
+      );
+      notifier.setChannelManager(null);
+      expect(
+        container.read(tmuxProvider('never-connected')).value?.availability,
+        isNot(isA<TmuxNotInstalled>()),
+        reason: 'losing the SSH connection must not be reported as tmux '
+            'being confirmed absent',
+      );
     });
 
     test('setChannelManager(null) is a no-op when already null', () async {
@@ -632,7 +678,7 @@ void main() {
         completes,
       );
 
-      // State must remain unchanged (TmuxNotInstalled).
+      // State must remain unchanged (TmuxNotConnected).
       final state = container.read(tmuxProvider('conn-1'));
       expect(state.value?.isAvailable, isFalse);
     });
@@ -1107,8 +1153,9 @@ void main() {
       registerFallbackValue('');
     });
 
-    // setChannelManager(null) は同期的に state = TmuxNotInstalled をセットする。
-    // その後 _initializeState が完了しても state が上書きされないことを検証する。
+    // setChannelManager(null) は同期的に state = TmuxNotConnected をセットする
+    // (未インストール確定ではなく「まだ接続していない」)。その後
+    // _initializeState が完了しても state が上書きされないことを検証する。
     test(
         'setChannelManager(null) during _initializeState prevents stale '
         'TmuxAvailable from being restored', () async {
@@ -1132,7 +1179,7 @@ void main() {
 
       // _makePartialSuccessManager succeeds availability check but throws for
       // list-sessions. Without the staleness guard the catch block would restore
-      // prev (TmuxAvailable) after setChannelManager(null) set TmuxNotInstalled.
+      // prev (TmuxAvailable) after setChannelManager(null) set TmuxNotConnected.
       notifier.setChannelManager(_makePartialSuccessManager());
 
       // Immediately clear the channel — simulates SSH disconnect.
@@ -1140,9 +1187,9 @@ void main() {
 
       // Verify synchronous reset is already in effect.
       final stateSync = container.read(tmuxProvider('sg-test-1'));
-      expect(stateSync.value?.isAvailable, isFalse,
+      expect(stateSync.value?.availability, isA<TmuxNotConnected>(),
           reason:
-              'setChannelManager(null) must synchronously set TmuxNotInstalled');
+              'setChannelManager(null) must synchronously set TmuxNotConnected');
 
       // Wait for any pending _initializeState work to complete.
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -1156,7 +1203,7 @@ void main() {
       expect(stateAsync.value?.sessions, isEmpty);
     });
 
-    // null → non-null → null の連続遷移でも最終 state は TmuxNotInstalled。
+    // null → non-null → null の連続遷移でも最終 state は TmuxNotConnected。
     test(
         'setChannelManager(null) resets state regardless of '
         '_initializeState background work',
@@ -1166,7 +1213,8 @@ void main() {
       await container.read(tmuxProvider('sg-test-2').future);
       final notifier = container.read(tmuxProvider('sg-test-2').notifier);
 
-      // Use a throwing manager — _checkAvailability catches and returns TmuxNotInstalled.
+      // Use a throwing manager so _initializeState(m) has real background
+      // work in flight when we immediately clear the channel below.
       final m = _MockSshChannelManager();
       when(() => m.executeCommand(any())).thenThrow(Exception('channel error'));
 
@@ -1176,6 +1224,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       final state = container.read(tmuxProvider('sg-test-2'));
+      expect(state.value?.availability, isA<TmuxNotConnected>());
       expect(state.value?.isAvailable, isFalse);
       expect(state.value?.sessions, isEmpty);
     });
@@ -2140,7 +2189,7 @@ void main() {
     setUp(() async {
       container = ProviderContainer();
       addTearDown(container.dispose);
-      // Wait for initial build (no channel manager yet → TmuxNotInstalled).
+      // Wait for initial build (no channel manager yet → TmuxNotConnected).
       await container.read(tmuxProvider('rc-close-test').future);
       notifier = container.read(tmuxProvider('rc-close-test').notifier);
     });
@@ -2263,7 +2312,7 @@ void main() {
       fakeAsync((async) {
         final container = ProviderContainer();
 
-        // Kick off initial build (channelManager == null → TmuxNotInstalled).
+        // Kick off initial build (channelManager == null → TmuxNotConnected).
         container.read(tmuxProvider('done-timeout-test'));
         async.flushMicrotasks();
 

@@ -139,6 +139,8 @@
   "tmuxNotInstalled": "tmux belum diinstal",
   "tmuxAvailabilityUnknown": "Tidak dapat memeriksa status tmux",
   "tmuxAvailabilityUnknownDescription": "Periksa koneksi Anda dan coba lagi.",
+  "tmuxWaitingForConnection": "Menunggu koneksi…",
+  "tmuxWaitingForConnectionDescription": "Status tmux akan diperiksa setelah koneksi siap.",
   "installTmuxOnServer": "Instal tmux di server Anda:",
   "distroDebianUbuntu": "Debian/Ubuntu",
   "distroMacOS": "macOS",
