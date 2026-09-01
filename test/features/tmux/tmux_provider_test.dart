@@ -2377,6 +2377,249 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
+  // TmuxUnknown — a transient availability-check failure must not clear a
+  // rich state (2026-09-01 tmux availability-flash fix)
+  //
+  // Root cause: right after connecting, the SSH exec channel can be briefly
+  // unstable, so `tmux -V` fails with an exception/timeout or returns empty
+  // output. The old code mapped ALL of that straight to TmuxNotInstalled,
+  // indistinguishable from a genuine "tmux is not on this server" result.
+  // When a rich state (TmuxAvailable + sessions) already existed — e.g. the
+  // channelManager was replaced right after a successful check — this wiped
+  // the session list the user had just seen, producing the reported
+  // "sessions flash then switch to 'not installed'" bug.
+  //
+  // Fix: an inconclusive check now maps to TmuxUnknown, which is retried
+  // once after a short delay, and if still inconclusive, the existing state
+  // (whatever it was) is preserved instead of being replaced.
+  // ---------------------------------------------------------------------------
+
+  group('_checkAvailability() transient failure does not clear rich state', () {
+    setUpAll(() {
+      registerFallbackValue('');
+    });
+
+    test(
+        'tmux -V throwing after a rich state was already established keeps '
+        'the session list instead of falling back to TmuxNotInstalled',
+        () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      await container.read(tmuxProvider('unk-rich').future);
+      final notifier = container.read(tmuxProvider('unk-rich').notifier);
+
+      // First establish a rich state: TmuxAvailable + 1 session.
+      notifier.setChannelManager(_makeFullSuccessManager());
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      final rich = container.read(tmuxProvider('unk-rich'));
+      expect(rich.value?.isAvailable, isTrue);
+      expect(rich.value?.sessions.length, 1);
+
+      // Now the channelManager is replaced (e.g. a reconnect) and `tmux -V`
+      // persistently throws on the new one — simulating an exec channel
+      // that never stabilizes, not a real "tmux is missing" result.
+      final flaky = _MockSshChannelManager();
+      when(() => flaky.executeCommand(any()))
+          .thenThrow(Exception('exec channel not ready'));
+      notifier.setChannelManager(flaky);
+
+      // Wait past the single 600ms retry inside _checkAvailabilityResilient.
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+
+      final state = container.read(tmuxProvider('unk-rich'));
+      expect(state, isA<AsyncData<TmuxState>>(),
+          reason: 'must stay AsyncData, never AsyncError');
+      expect(state.value?.isAvailable, isTrue,
+          reason: 'a persistently inconclusive check must not overwrite a '
+              'previously-established TmuxAvailable state');
+      expect(state.value?.sessions.length, 1,
+          reason: 'the session list must survive an inconclusive '
+              'availability re-check');
+      expect(state.value?.sessions.first.name, 'work');
+    });
+
+    test(
+        'tmux -V fails once then succeeds on the retry: TmuxAvailable is '
+        'reached without ever surfacing TmuxNotInstalled', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      await container.read(tmuxProvider('unk-retry-ok').future);
+      final notifier = container.read(tmuxProvider('unk-retry-ok').notifier);
+
+      var versionCalls = 0;
+      final versionOk = _makeSession(
+        stdout: utf8.encode('tmux 3.3a\n'),
+        exitCode: null,
+      );
+      final listEmpty = _makeSession(stdout: const [], exitCode: 0);
+
+      final m = _MockSshChannelManager();
+      when(() => m.executeCommand(any())).thenAnswer((inv) async {
+        final cmd = inv.positionalArguments[0] as String;
+        if (cmd.contains('tmux -V')) {
+          versionCalls++;
+          if (versionCalls == 1) {
+            throw Exception('exec channel not ready yet');
+          }
+          return versionOk;
+        }
+        return listEmpty; // list-sessions
+      });
+
+      final seenStates = <TmuxAvailability>[];
+      container.listen(tmuxProvider('unk-retry-ok'), (_, next) {
+        final a = next.valueOrNull?.availability;
+        if (a != null) seenStates.add(a);
+      });
+
+      notifier.setChannelManager(m);
+
+      // Wait past the 600ms retry delay plus the second check + fetch.
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+
+      final state = container.read(tmuxProvider('unk-retry-ok'));
+      expect(state.value?.isAvailable, isTrue,
+          reason: 'the retried check must reach TmuxAvailable');
+      expect(versionCalls, 2,
+          reason: 'exactly one retry (2 total calls) is expected');
+      expect(seenStates.whereType<TmuxNotInstalled>(), isEmpty,
+          reason: 'the transient failure must never be surfaced as '
+              'TmuxNotInstalled while retrying');
+    });
+
+    test(
+        'tmux -V completing with a non-zero exit code still maps to '
+        'TmuxNotInstalled even when a rich state existed before (a real '
+        'not-installed result must not be hidden by the retry/preserve '
+        'logic)', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      await container.read(tmuxProvider('unk-real-notinstalled').future);
+      final notifier =
+          container.read(tmuxProvider('unk-real-notinstalled').notifier);
+
+      notifier.setChannelManager(_makeFullSuccessManager());
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(
+        container.read(tmuxProvider('unk-real-notinstalled')).value?.isAvailable,
+        isTrue,
+      );
+
+      // tmux was genuinely uninstalled from the server (or a new server
+      // without tmux was connected to under the same session id).
+      final noTmux = _MockSshChannelManager();
+      final versionFail = _makeSession(exitCode: 127);
+      when(() => noTmux.executeCommand(any()))
+          .thenAnswer((_) => Future.value(versionFail));
+      notifier.setChannelManager(noTmux);
+
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      final state = container.read(tmuxProvider('unk-real-notinstalled'));
+      expect(state.value?.isAvailable, isFalse,
+          reason: 'a completed non-zero exit code is a definite '
+              'not-installed result and must not be masked by the '
+              'TmuxUnknown preserve-previous-state logic');
+      expect(state.value?.sessions, isEmpty);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // refresh() re-checks availability when not currently TmuxAvailable
+  // (2026-09-01) — previously refresh() only ever re-fetched the session
+  // list, so once availability fell to TmuxNotInstalled/TmuxUnknown the
+  // header's refresh button could never recover; only the drawer's
+  // "check again" (which invalidates the whole provider) could.
+  // ---------------------------------------------------------------------------
+
+  group('refresh() recovers from a non-available state', () {
+    setUpAll(() {
+      registerFallbackValue('');
+    });
+
+    test('refresh() re-checks availability and reaches TmuxAvailable',
+        () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      await container.read(tmuxProvider('refresh-recover').future);
+      final notifier = container.read(tmuxProvider('refresh-recover').notifier);
+
+      var versionCalls = 0;
+      final versionFail = _makeSession(exitCode: 1);
+      final versionOk = _makeSession(
+        stdout: utf8.encode('tmux 3.3a\n'),
+        exitCode: null,
+      );
+      final listOne = _makeSession(
+        stdout: utf8.encode('work|||1|||0|||1700000000\n'),
+        exitCode: 0,
+      );
+
+      final m = _MockSshChannelManager();
+      when(() => m.executeCommand(any())).thenAnswer((inv) async {
+        final cmd = inv.positionalArguments[0] as String;
+        if (cmd.contains('tmux -V')) {
+          versionCalls++;
+          return versionCalls == 1 ? versionFail : versionOk;
+        }
+        return listOne; // list-sessions / list-panes / capture-pane
+      });
+
+      notifier.setChannelManager(m);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      // Confirm we start from a genuinely not-available state.
+      expect(
+        container.read(tmuxProvider('refresh-recover')).value?.isAvailable,
+        isFalse,
+        reason: 'setup: initial check must fail (exit code 1)',
+      );
+
+      // tmux is now "installed" (the mock flips to success) and the user
+      // presses the header's refresh button.
+      await notifier.refresh();
+
+      final state = container.read(tmuxProvider('refresh-recover'));
+      expect(state.value?.isAvailable, isTrue,
+          reason: 'refresh() must re-check availability, not just sessions, '
+              'when the current state is not TmuxAvailable');
+      expect(state.value?.sessions.map((s) => s.name), contains('work'),
+          reason: 'once availability is confirmed, refresh() must also '
+              'fetch the session list in the same call');
+    });
+
+    test(
+        'refresh() leaves state as TmuxNotInstalled when the re-check still '
+        'fails (no spurious AsyncError, no sessions fabricated)', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      await container.read(tmuxProvider('refresh-still-fails').future);
+      final notifier =
+          container.read(tmuxProvider('refresh-still-fails').notifier);
+
+      final m = _MockSshChannelManager();
+      final versionFail = _makeSession(exitCode: 1);
+      when(() => m.executeCommand(any()))
+          .thenAnswer((_) => Future.value(versionFail));
+
+      notifier.setChannelManager(m);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(
+        container.read(tmuxProvider('refresh-still-fails')).value?.isAvailable,
+        isFalse,
+      );
+
+      await notifier.refresh();
+
+      final state = container.read(tmuxProvider('refresh-still-fails'));
+      expect(state, isA<AsyncData<TmuxState>>());
+      expect(state.value?.isAvailable, isFalse);
+      expect(state.value?.sessions, isEmpty);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Channel-open timeout releases a stuck _isOperating latch
   // (2026-08-31 tmux latch-stuck fix)
   //

@@ -167,6 +167,8 @@
   "openSelectedSessions": "Open {count} selected",
   "@openSelectedSessions": { "placeholders": { "count": { "type": "int" } } },
   "tmuxNotInstalled": "tmux is not installed",
+  "tmuxAvailabilityUnknown": "Couldn't check tmux status",
+  "tmuxAvailabilityUnknownDescription": "Check your connection and try again.",
   "installTmuxOnServer": "Install tmux on your server:",
   "distroDebianUbuntu": "Debian/Ubuntu",
   "distroMacOS": "macOS",

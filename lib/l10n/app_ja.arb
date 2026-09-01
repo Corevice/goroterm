@@ -137,6 +137,8 @@
   "selectSessions": "選択",
   "openSelectedSessions": "選択した {count} 件を開く",
   "tmuxNotInstalled": "tmux がインストールされていません",
+  "tmuxAvailabilityUnknown": "tmux の状態を確認できませんでした",
+  "tmuxAvailabilityUnknownDescription": "接続を確認してもう一度お試しください。",
   "installTmuxOnServer": "サーバーに tmux をインストールしてください:",
   "distroDebianUbuntu": "Debian/Ubuntu",
   "distroMacOS": "macOS",

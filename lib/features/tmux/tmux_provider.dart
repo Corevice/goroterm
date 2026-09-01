@@ -48,12 +48,22 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       state = const AsyncLoading();
     }
     try {
-      final availability = await _checkAvailability(channelManager);
+      final availability = await _checkAvailabilityResilient(channelManager);
       // Stale check: channelManager was replaced or cleared while we were working.
       // Aborting prevents overwriting state set by a later setChannelManager() call.
       if (_channelManager != channelManager) return;
       if (availability is TmuxNotInstalled) {
         state = AsyncData(TmuxState(availability: availability));
+        return;
+      }
+      if (availability is TmuxUnknown) {
+        // 判定不能（リトライ後もなお不明）: 直前の state を壊さない。
+        // 直前に一覧があった場合はもちろん、直前が TmuxNotInstalled 等でも
+        // それをそのまま維持する — ここで新たに取得した情報は「わからな
+        // かった」以上のものではないため、既存の判断を上書きする理由がない。
+        // 直前の state が無ければ（実質ありえないが）Unknown をそのまま保持し、
+        // UI 側は「未インストール」ではなく再試行可能な表示にする。
+        state = AsyncData(prev ?? TmuxState(availability: availability));
         return;
       }
       // リトライは「以前は一覧があったのに空が返った」＝接続直後の一時的な
@@ -89,8 +99,14 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       return const TmuxState(availability: TmuxNotInstalled());
     }
 
-    final availability = await _checkAvailability(channelManager);
+    final availability = await _checkAvailabilityResilient(channelManager);
     if (availability is TmuxNotInstalled) {
+      return TmuxState(availability: availability);
+    }
+    if (availability is TmuxUnknown) {
+      // build() はこの notifier インスタンスの最初の state であり、壊す
+      // べき「前回の一覧」は存在しない。判定不能をそのまま表示し、UI 側で
+      // 再試行できるようにする。
       return TmuxState(availability: availability);
     }
 
@@ -112,6 +128,31 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     }
 
     try {
+      // availability がまだ TmuxAvailable に達していない（未インストール／
+      // 判定不能）場合、更新ボタンからも復帰できるよう availability 自体を
+      // 再判定する。ドロワーの「もう一度確認」(invalidate) しか復帰手段が
+      // 無かった状態を解消する。既に Available ならセッション一覧だけを
+      // 再取得し、無駄な `tmux -V` 呼び出しを避ける。
+      if (current.availability is! TmuxAvailable) {
+        final availability = await _checkAvailabilityResilient(channelManager);
+        if (_channelManager != channelManager) return; // stale
+        if (availability is! TmuxAvailable) {
+          // まだ利用可能と確認できない（未インストール／判定不能のまま）。
+          // セッション一覧は取得しようがないので availability だけ反映する。
+          state = AsyncData(current.copyWith(availability: availability));
+          return;
+        }
+        final sessions = await _fetchSessionsResilient(
+          channelManager,
+          retryIfEmpty: current.sessions.isNotEmpty,
+        );
+        if (_channelManager != channelManager) return; // stale
+        state = AsyncData(
+          current.copyWith(availability: availability, sessions: sessions),
+        );
+        return;
+      }
+
       // 直前に一覧があったのに空が返った場合だけ、接続直後などの一時的な
       // 空応答を疑って一度再取得する（既に空なら余計な待ちを入れない）。
       final sessions = await _fetchSessionsResilient(
@@ -272,6 +313,30 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
   // Private helpers
   // ---------------------------------------------------------------------------
 
+  /// 接続直後などで exec チャネルが不安定なとき、[_checkAvailability] が
+  /// 判定不能 ([TmuxUnknown]) を返したら [_availabilityRetryDelay] だけ待って
+  /// 一度だけ再判定する。`_fetchSessionsResilient` の空応答リトライ
+  /// (600ms・1回) と同じ考え方・同じ間隔を踏襲している。
+  static const _availabilityRetryDelay = Duration(milliseconds: 600);
+
+  Future<TmuxAvailability> _checkAvailabilityResilient(
+    SshChannelManager channelManager,
+  ) async {
+    final availability = await _checkAvailability(channelManager);
+    if (availability is! TmuxUnknown) return availability;
+    await Future<void>.delayed(_availabilityRetryDelay);
+    if (_channelManager != channelManager) return availability; // stale
+    return _checkAvailability(channelManager);
+  }
+
+  /// tmux が「確実に未インストール」「利用可能」「判定できなかった」のいずれ
+  /// かを返す。
+  ///
+  /// 「未インストール」と「判定できなかった」を混同しない: 接続直後は SSH の
+  /// exec チャネルがまだ不安定で `tmux -V` が例外やタイムアウトで失敗したり、
+  /// 空応答を返したりすることがある。これを未インストール扱いにすると、
+  /// 実際には tmux があるサーバーでも一時的な失敗のたびに「未インストール」
+  /// 画面へ切り替わってしまう。
   Future<TmuxAvailability> _checkAvailability(
       SshChannelManager channelManager) async {
     try {
@@ -279,16 +344,24 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       // command -v tmux との2段階チェックは不要
       final (versionOutput, _, exitCode) =
           await _runCommand(channelManager, 'tmux -V');
+      // コマンドが完走して失敗を報告した場合のみ「確実に未インストール」。
       if (exitCode != null && exitCode != 0) return const TmuxNotInstalled();
       final version = versionOutput.trim();
-      // exitCode が null（dartssh2 の制約）かつ出力が tmux バージョン形式でない場合は
-      // tmux 未インストールと判断する
-      if (version.isEmpty || !version.toLowerCase().startsWith('tmux')) {
+      // 出力が空の場合、未インストールなのか、単にこの exec が一時的に何も
+      // 返さなかっただけなのかを区別できない。判定不能として扱う。
+      if (version.isEmpty) {
+        return const TmuxUnknown();
+      }
+      // 出力はあるが tmux のバージョン文字列ではない（例: シェルのエラー
+      // メッセージ）場合は「確実に未インストール」と判断してよい。
+      if (!version.toLowerCase().startsWith('tmux')) {
         return const TmuxNotInstalled();
       }
       return TmuxAvailable(version: version);
     } catch (_) {
-      return const TmuxNotInstalled();
+      // 例外（TimeoutException を含む）は「未インストール」と断定できない。
+      // 接続直後の不安定な exec チャネルでも発生するため判定不能として扱う。
+      return const TmuxUnknown();
     }
   }
 

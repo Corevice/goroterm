@@ -60,6 +60,17 @@ class TmuxNotInstalled extends TmuxAvailability {
   const TmuxNotInstalled();
 }
 
+/// tmux がインストールされているかどうかを判定できなかった状態。
+///
+/// 「未インストールと確定した」(`TmuxNotInstalled`) とは区別する。接続直後は
+/// SSH の exec チャネルがまだ不安定で `tmux -V` が一時的に失敗したり空応答を
+/// 返したりすることがあり、それを未インストールと誤判定すると、実際には
+/// tmux があるのに直前まで表示されていたセッション一覧が「未インストール」
+/// 画面に置き換わってしまう（一瞬表示されて消えるフラッシュの原因）。
+class TmuxUnknown extends TmuxAvailability {
+  const TmuxUnknown();
+}
+
 /// Combined state returned by [TmuxNotifier].
 class TmuxState {
   const TmuxState({
