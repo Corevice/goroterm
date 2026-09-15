@@ -31,5 +31,6 @@ class TmuxError extends AppError {
 enum TmuxErrorReason {
   notInstalled,
   sessionNotFound,
+  notConnected,
   unknown,
 }

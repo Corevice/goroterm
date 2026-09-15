@@ -17,6 +17,22 @@ void _showOperationInProgressSnackBar(BuildContext context) {
   );
 }
 
+/// Maps a tmux operation failure to a user-facing message. A [TmuxError]
+/// with [TmuxErrorReason.notConnected] means the operation never ran because
+/// there is no SSH connection right now — that is not the same situation as
+/// a command that ran and failed, so it gets its own, more actionable
+/// message instead of [defaultMessage]'s generic "failed: error" text.
+String _tmuxErrorMessage(
+  BuildContext context,
+  Object error,
+  String Function(String) defaultMessage,
+) {
+  if (error is TmuxError && error.reason == TmuxErrorReason.notConnected) {
+    return AppLocalizations.of(context).tmuxNotConnectedMessage;
+  }
+  return defaultMessage(error.toString());
+}
+
 class TmuxManagerScreen extends ConsumerStatefulWidget {
   const TmuxManagerScreen({
     super.key,
@@ -39,6 +55,17 @@ class TmuxManagerScreen extends ConsumerStatefulWidget {
 class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
   AsyncValue<TmuxState> _tmuxState = const AsyncLoading();
   ProviderSubscription<AsyncValue<TmuxState>>? _subscription;
+
+  // このドロワーは endDrawer (terminal_screen.dart) の中に表示される。
+  // Flutter の Scaffold は drawer/endDrawer を children の最後に積むため、
+  // 外側 Scaffold の ScaffoldMessenger に出した SnackBar は開いている
+  // endDrawer とスクリムの下に隠れて見えなくなる。ここに独自の
+  // ScaffoldMessenger を持たせ、SnackBar をドロワー自身の中に出す。
+  final GlobalKey<ScaffoldMessengerState> _messengerKey =
+      GlobalKey<ScaffoldMessengerState>();
+
+  /// 手動更新（ヘッダーの更新ボタン / pull-to-refresh）が in-flight かどうか。
+  bool _refreshing = false;
 
   @override
   void initState() {
@@ -68,37 +95,70 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
           .read(tmuxProvider(widget.connectionId).notifier)
           .createSession(name);
       if (!ran && mounted) {
-        _showOperationInProgressSnackBar(context);
+        _showSnackBar(AppLocalizations.of(context).tmuxOperationInProgress);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppLocalizations.of(context).failedToCreateSession(e.toString()))),
-        );
+        _showSnackBar(_tmuxErrorMessage(
+          context,
+          e,
+          AppLocalizations.of(context).failedToCreateSession,
+        ));
       }
+    }
+  }
+
+  /// SnackBar をこのドロワー自身の ScaffoldMessenger に出す（外側 Scaffold の
+  /// SnackBar は開いている endDrawer の下に隠れて見えないため）。
+  void _showSnackBar(String message) {
+    _messengerKey.currentState?.showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _handleManualRefresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    bool refreshed;
+    try {
+      refreshed = await ref
+          .read(tmuxProvider(widget.connectionId).notifier)
+          .refresh();
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+    if (!refreshed && mounted) {
+      _showSnackBar(AppLocalizations.of(context).tmuxRefreshFailed);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.grey[900],
-      child: Column(
-        children: [
-          _buildHeader(),
-          Expanded(
-            child: _tmuxState.when(
-              loading: () =>
-                  const Center(child: CircularProgressIndicator()),
-              error: (e, _) => _ErrorView(
-                error: e,
-                onRetry: () =>
-                    ref.invalidate(tmuxProvider(widget.connectionId)),
+    // 独自の ScaffoldMessenger を挟むことで、このドロワー内で出す SnackBar が
+    // 外側 Scaffold (endDrawer を持つ) のスクリムの下に隠れないようにする。
+    // 詳細は _messengerKey のコメントを参照。
+    return ScaffoldMessenger(
+      key: _messengerKey,
+      child: Scaffold(
+        backgroundColor: Colors.grey[900],
+        body: Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: _tmuxState.when(
+                loading: () =>
+                    const Center(child: CircularProgressIndicator()),
+                error: (e, _) => _ErrorView(
+                  error: e,
+                  onRetry: () => ref
+                      .read(tmuxProvider(widget.connectionId).notifier)
+                      .refresh(),
+                ),
+                data: (state) => _buildAvailabilityBody(state),
               ),
-              data: (state) => _buildAvailabilityBody(state),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -112,19 +172,22 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
     }
     if (state.availability is TmuxUnknown) {
       return _AvailabilityUnknownView(
-        onRetry: () => ref.invalidate(tmuxProvider(widget.connectionId)),
+        onRetry: () => ref
+            .read(tmuxProvider(widget.connectionId).notifier)
+            .refresh(),
       );
     }
     if (!state.isAvailable) {
       return _NotInstalledView(
-        onRetry: () => ref.invalidate(tmuxProvider(widget.connectionId)),
+        onRetry: () => ref
+            .read(tmuxProvider(widget.connectionId).notifier)
+            .refresh(),
       );
     }
     return _SessionListView(
       state: state,
       canOpenAll: widget.onAttachSession != null,
-      onRefresh: () =>
-          ref.read(tmuxProvider(widget.connectionId).notifier).refresh(),
+      onRefresh: _handleManualRefresh,
       onAttach: (name) {
         if (widget.onAttachSession != null) {
           widget.onAttachSession!(name);
@@ -168,12 +231,25 @@ class _TmuxManagerScreenState extends ConsumerState<TmuxManagerScreen> {
               ),
             ),
           ),
-          IconButton(
-            icon: Icon(Icons.refresh, color: Colors.grey[400], size: 20),
-            tooltip: l.refresh,
-            onPressed: () =>
-                ref.read(tmuxProvider(widget.connectionId).notifier).refresh(),
-          ),
+          _refreshing
+              // IconButton と同じ 48x48 を占有し、差し替え時にヘッダーの
+              // レイアウトがずれないようにする。
+              ? const SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Center(
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                )
+              : IconButton(
+                  icon: Icon(Icons.refresh, color: Colors.grey[400], size: 20),
+                  tooltip: l.refresh,
+                  onPressed: _handleManualRefresh,
+                ),
           IconButton(
             icon: const Icon(Icons.add, color: Colors.tealAccent, size: 20),
             tooltip: l.newSession,
@@ -411,7 +487,11 @@ class _SessionListViewState extends State<_SessionListView> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(AppLocalizations.of(context).failedToKillSession(e.toString()))),
+            SnackBar(content: Text(_tmuxErrorMessage(
+              context,
+              e,
+              AppLocalizations.of(context).failedToKillSession,
+            ))),
           );
         }
       }
@@ -503,7 +583,11 @@ class _SessionListViewState extends State<_SessionListView> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppLocalizations.of(context).failedToRenameSession(e.toString()))),
+          SnackBar(content: Text(_tmuxErrorMessage(
+            context,
+            e,
+            AppLocalizations.of(context).failedToRenameSession,
+          ))),
         );
       }
     }

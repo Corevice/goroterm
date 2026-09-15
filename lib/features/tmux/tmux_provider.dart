@@ -123,15 +123,39 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     return TmuxState(availability: availability, sessions: sessions);
   }
 
-  Future<void> refresh() async {
+  /// in-flight の refresh() を合流させるための共有 Future。
+  /// 手動更新ボタン・自動更新タイマー・_safeRefresh 相当の呼び出しが重なっても
+  /// exec を 1 回しか発行しない（同じ Future を返す）。
+  Future<bool>? _inflightRefresh;
+
+  /// セッション一覧（および availability）を再取得する。
+  /// 戻り値: true = 新しい一覧/availability で state を更新できた。
+  ///         false = channelManager が無い、またはエラーで前回 state を維持した。
+  Future<bool> refresh() {
+    final inflight = _inflightRefresh;
+    if (inflight != null) return inflight;
+    final future = _refreshInternal();
+    _inflightRefresh = future;
+    // whenComplete が返す Future は元の future のエラーも引き継ぐ。誰も待たない
+    // ので、そのままだと unhandled async error になる。エラー自体は呼び出し側が
+    // 受け取る元の future で処理されるため、ここでは握りつぶしてよい。
+    unawaited(future.whenComplete(() {
+      if (identical(_inflightRefresh, future)) {
+        _inflightRefresh = null;
+      }
+    }).catchError((_) => false));
+    return future;
+  }
+
+  Future<bool> _refreshInternal() async {
     final channelManager = _channelManager;
-    if (channelManager == null) return; // AsyncError にしない
+    if (channelManager == null) return false; // AsyncError にしない
 
     final current = state.valueOrNull;
     if (current == null) {
       // build がまだ完了していない場合も安全に初期化できる
-      _initializeState(channelManager);
-      return;
+      await _initializeState(channelManager);
+      return true;
     }
 
     try {
@@ -142,22 +166,22 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
       // 再取得し、無駄な `tmux -V` 呼び出しを避ける。
       if (current.availability is! TmuxAvailable) {
         final availability = await _checkAvailabilityResilient(channelManager);
-        if (_channelManager != channelManager) return; // stale
+        if (_channelManager != channelManager) return false; // stale
         if (availability is! TmuxAvailable) {
           // まだ利用可能と確認できない（未インストール／判定不能のまま）。
           // セッション一覧は取得しようがないので availability だけ反映する。
           state = AsyncData(current.copyWith(availability: availability));
-          return;
+          return true;
         }
         final sessions = await _fetchSessionsResilient(
           channelManager,
           retryIfEmpty: current.sessions.isNotEmpty,
         );
-        if (_channelManager != channelManager) return; // stale
+        if (_channelManager != channelManager) return false; // stale
         state = AsyncData(
           current.copyWith(availability: availability, sessions: sessions),
         );
-        return;
+        return true;
       }
 
       // 直前に一覧があったのに空が返った場合だけ、接続直後などの一時的な
@@ -166,11 +190,13 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
         channelManager,
         retryIfEmpty: current.sessions.isNotEmpty,
       );
-      if (_channelManager != channelManager) return; // stale
+      if (_channelManager != channelManager) return false; // stale
       state = AsyncData(current.copyWith(sessions: sessions));
+      return true;
     } catch (_) {
       // エラーでも前回データを維持
       state = AsyncData(current);
+      return false;
     }
   }
 
@@ -242,11 +268,22 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
   /// succeeded or, with [swallowErrors], failed silently). If [operation]
   /// throws and [swallowErrors] is false, the exception propagates instead
   /// of a return value.
+  ///
+  /// Before starting [operation], throws [TmuxError] with
+  /// [TmuxErrorReason.notConnected] if there is no channelManager —
+  /// regardless of [swallowErrors] (an operation that never ran because
+  /// there is no connection must not be silently treated as "ran fine").
   Future<bool> _runExclusive(
     Future<void> Function() operation, {
     bool swallowErrors = false,
   }) async {
     if (_isOperating) return false;
+    if (_channelManager == null) {
+      throw const TmuxError(
+        'Not connected to SSH session',
+        reason: TmuxErrorReason.notConnected,
+      );
+    }
     _isOperating = true;
     try {
       await operation();
@@ -559,11 +596,32 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
     }));
     return future.timeout(_channelOpenTimeout, onTimeout: () {
       timedOut = true;
+      _notifyConnectionMaybeDead();
       throw TimeoutException(
         'SSH exec channel did not open within $_channelOpenTimeout',
         _channelOpenTimeout,
       );
     });
+  }
+
+  /// A channel-open timeout is a strong signal that the underlying SSH
+  /// connection is dead (half-open TCP after sleep/NAT timeout, etc.) —
+  /// unlike the stdout/stderr read [timeout] in [_runCommand], which could
+  /// just mean a slow command. Ask the connection layer to actively verify
+  /// liveness (and reconnect if needed) instead of waiting for the next
+  /// app-resume check. fire-and-forget: failures here must not affect the
+  /// tmux operation's own error handling.
+  void _notifyConnectionMaybeDead() {
+    try {
+      unawaited(
+        ref
+            .read(terminalConnectionProvider(arg).notifier)
+            .verifyConnectionAlive()
+            .catchError((_) {}),
+      );
+    } catch (_) {
+      // ref may already be disposed — nothing useful to do.
+    }
   }
 
   /// Runs a command via exec channel and collects stdout, stderr, and exit code.

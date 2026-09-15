@@ -4769,4 +4769,168 @@ void main() {
       verifyNever(() => mockManager.runCommand(any()));
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Desktop liveness timer (brief B-2 / test (g))
+  //
+  // On desktop platforms (macOS/Windows/Linux — this test runs on Linux),
+  // _setConnectedState() starts a 30s Timer.periodic that calls
+  // activeKeepAlive(). Three consecutive failures (the existing 3-strike
+  // rule) must disconnect, same as the mobile foreground-service path.
+  // ---------------------------------------------------------------------------
+
+  group('desktop liveness timer', () {
+    late ProviderContainer container;
+    late TerminalConnectionNotifier notifier;
+
+    setUp(() {
+      container = makeContainer();
+      notifier = container.read(
+        terminalConnectionProvider('desktop-liveness-test').notifier,
+      );
+    });
+
+    tearDown(() => container.dispose());
+
+    test(
+        '_setConnectedState() starts the timer, and 3 consecutive 30s '
+        'keepAlive failures disconnect', () {
+      fakeAsync((async) {
+        final fakeService = _FakeSshClientService()..keepAliveResult = false;
+        // Wire up the fake service and a config (so activeKeepAlive's status
+        // guard and _setConnectedState's reconnect wiring both behave like a
+        // real connection) before triggering _setConnectedState() itself.
+        notifier.initConnectedStateForTesting(
+          sshService: fakeService,
+          connectedState: const TerminalConnectionState(
+            status: ConnectionStatus.connected,
+            hostLabel: 'test-host',
+          ),
+          config: const ConnectionConfig(
+            label: 'test-server',
+            host: '192.168.1.1',
+            username: 'admin',
+          ),
+        );
+        notifier.callSetConnectedStateForTesting(Terminal(maxLines: 50));
+        async.flushMicrotasks();
+
+        expect(
+          container
+              .read(terminalConnectionProvider('desktop-liveness-test'))
+              .status,
+          ConnectionStatus.connected,
+        );
+
+        // Tick 1 (30s): 1st failure — must not disconnect yet.
+        async.elapse(const Duration(seconds: 30));
+        async.flushMicrotasks();
+        expect(
+          container
+              .read(terminalConnectionProvider('desktop-liveness-test'))
+              .status,
+          ConnectionStatus.connected,
+          reason: '1 failure alone must not disconnect',
+        );
+
+        // Tick 2 (60s total): 2nd failure — still must not disconnect.
+        async.elapse(const Duration(seconds: 30));
+        async.flushMicrotasks();
+        expect(
+          container
+              .read(terminalConnectionProvider('desktop-liveness-test'))
+              .status,
+          ConnectionStatus.connected,
+          reason: '2 consecutive failures alone must not disconnect',
+        );
+
+        // Tick 3 (90s total): 3rd consecutive failure — disconnects.
+        async.elapse(const Duration(seconds: 30));
+        async.flushMicrotasks();
+        expect(
+          container
+              .read(terminalConnectionProvider('desktop-liveness-test'))
+              .status,
+          ConnectionStatus.disconnected,
+          reason: 'the 3rd consecutive periodic failure must disconnect, '
+              'same as the existing 3-strike rule',
+        );
+      });
+    });
+
+    test('does not start when desktopLivenessTimerEnabled is false', () {
+      fakeAsync((async) {
+        TerminalConnectionNotifier.desktopLivenessTimerEnabled = false;
+        addTearDown(() {
+          TerminalConnectionNotifier.desktopLivenessTimerEnabled = true;
+        });
+
+        final fakeService = _FakeSshClientService()..keepAliveResult = false;
+        notifier.initConnectedStateForTesting(
+          sshService: fakeService,
+          connectedState: const TerminalConnectionState(
+            status: ConnectionStatus.connected,
+            hostLabel: 'test-host',
+          ),
+        );
+        notifier.callSetConnectedStateForTesting(Terminal(maxLines: 50));
+        async.flushMicrotasks();
+
+        // Advance well past 3 ticks worth of time (90s) — nothing should
+        // happen since the periodic timer never started.
+        async.elapse(const Duration(seconds: 120));
+        async.flushMicrotasks();
+
+        expect(
+          container
+              .read(terminalConnectionProvider('desktop-liveness-test'))
+              .status,
+          ConnectionStatus.connected,
+          reason: 'desktopLivenessTimerEnabled = false must prevent the '
+              'periodic timer from ever starting',
+        );
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // verifyConnectionAlive() dedup guard (brief B-1 / test (h))
+  //
+  // verifyConnectionAlive() is a thin wrapper around checkConnection(), which
+  // is itself guarded by _isCheckingConnection so concurrent callers (tmux's
+  // channel-open-timeout signal and an app-resume checkConnection() landing
+  // at the same time) join into a single keepAlive probe round instead of
+  // issuing one each.
+  // ---------------------------------------------------------------------------
+
+  group('verifyConnectionAlive() dedup guard', () {
+    test('two concurrent calls send only one keepAlive probe round', () async {
+      final container = makeContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(
+        terminalConnectionProvider('verify-dedup-test').notifier,
+      );
+      final countingService = _CountingSshClientService();
+      notifier.initConnectedStateForTesting(
+        sshService: countingService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+        config: const ConnectionConfig(
+          label: 'test-server',
+          host: '192.168.1.1',
+          username: 'admin',
+        ),
+      );
+
+      final f1 = notifier.verifyConnectionAlive();
+      final f2 = notifier.verifyConnectionAlive();
+      await Future.wait([f1, f2]);
+
+      expect(countingService.keepAliveCount, 1,
+          reason: 'the second concurrent call must join the first via the '
+              '_isCheckingConnection guard instead of sending its own probe');
+    });
+  });
 }

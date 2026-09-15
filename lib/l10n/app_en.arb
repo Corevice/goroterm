@@ -161,6 +161,8 @@
   "failedToRenameSession": "Failed to rename session: {error}",
   "@failedToRenameSession": { "placeholders": { "error": { "type": "String" } } },
   "tmuxOperationInProgress": "Another tmux operation is already in progress. Please try again.",
+  "tmuxRefreshFailed": "Couldn't refresh. Checking the connection…",
+  "tmuxNotConnectedMessage": "Not connected. Please try again after reconnecting.",
   "openAllSessions": "Open all {count} sessions",
   "@openAllSessions": { "placeholders": { "count": { "type": "int" } } },
   "selectSessions": "Select",

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -110,6 +112,25 @@ class TerminalConnectionNotifier
   // keepalive
   bool _isActiveKeepAliveRunning = false;
   int _keepAliveFailCount = 0;
+
+  // checkConnection() / verifyConnectionAlive() dedup guard — see checkConnection().
+  bool _isCheckingConnection = false;
+
+  // デスクトップ (macOS/Windows/Linux) 専用の定期生存確認タイマー。
+  // モバイルは foreground service 経由の activeKeepAlive() があるが、
+  // デスクトップには接続が「半開き」になったことを能動的に検知する経路が
+  // 無かった（スリープ復帰・NAT タイムアウト等で TCP は死んでいるのに
+  // keepAliveInterval の ping は再送キューに乗るだけで気づけない）。
+  // _setConnectedState() で開始し、_cleanupConnections() で必ず止める。
+  Timer? _desktopLivenessTimer;
+  static const _desktopLivenessInterval = Duration(seconds: 30);
+
+  /// テスト専用: デスクトップ生存確認タイマーの有効/無効を切り替える。
+  /// 既定は true。このマシン (Linux) でのテスト実行時に実タイマーが
+  /// 走ってもテストの tearDown (container.dispose → _cleanupConnections) で
+  /// 確実にキャンセルされるため、原則としてテスト側で操作する必要はない。
+  @visibleForTesting
+  static bool desktopLivenessTimerEnabled = true;
 
 
   // Batch output buffer: accumulates SSH stdout chunks and flushes periodically.
@@ -634,7 +655,20 @@ class TerminalConnectionNotifier
   }
 
   /// アプリ復帰時に呼ばれる。接続状態を確認し、必要に応じて再接続する。
+  /// 同時に 1 本しか走らないよう [_isCheckingConnection] で合流する
+  /// ([verifyConnectionAlive] からの呼び出しもこのガードを通る) —
+  /// resume 直後に複数箇所から呼ばれても keepAlive probe が重複しない。
   Future<void> checkConnection() async {
+    if (_isCheckingConnection) return;
+    _isCheckingConnection = true;
+    try {
+      await _checkConnectionCore();
+    } finally {
+      _isCheckingConnection = false;
+    }
+  }
+
+  Future<void> _checkConnectionCore() async {
     if (_isReconnecting) return;
     if (state.status == ConnectionStatus.reconnecting) return;
     if (state.status == ConnectionStatus.connecting) return;
@@ -683,6 +717,12 @@ class TerminalConnectionNotifier
       _onDisconnected();
     }
   }
+
+  /// tmux 側 (TmuxNotifier) から、exec チャネルの open がタイムアウトした
+  /// （＝接続が死んでいる強いシグナル）ときに呼ばれる。checkConnection() の
+  /// 薄いラッパーで、[_isCheckingConnection] ガードにより resume 経由の
+  /// checkConnection() と同時に呼ばれても keepAlive probe は重複しない。
+  Future<void> verifyConnectionAlive() => checkConnection();
 
   /// 手動の「Reconnect」ボタンから呼ばれる。リトライカウンタをリセットして再接続。
   Future<void> reconnect() async {
@@ -1092,7 +1132,29 @@ class TerminalConnectionNotifier
       shellExited: false,
     );
     _startClaudeDetectTimer();
+    _startDesktopLivenessTimerIfNeeded();
     _applyClaudeRcSetup();
+  }
+
+  /// デスクトップ (macOS/Windows/Linux) でのみ、接続中に 30 秒間隔で
+  /// [activeKeepAlive] を呼ぶ定期生存確認を開始する。モバイルは
+  /// foreground service の keepalive 受信で [activeKeepAlive] が呼ばれるが、
+  /// デスクトップにはそれに相当する能動的な生存確認の経路が無く、TCP が
+  /// 半開き（スリープ復帰・NAT タイムアウト等）になっても検知できなかった。
+  void _startDesktopLivenessTimerIfNeeded() {
+    _desktopLivenessTimer?.cancel();
+    _desktopLivenessTimer = null;
+    if (!desktopLivenessTimerEnabled) return;
+    if (kIsWeb) return;
+    if (!(Platform.isMacOS || Platform.isWindows || Platform.isLinux)) return;
+    _desktopLivenessTimer = Timer.periodic(_desktopLivenessInterval, (_) {
+      activeKeepAlive();
+    });
+  }
+
+  void _stopDesktopLivenessTimer() {
+    _desktopLivenessTimer?.cancel();
+    _desktopLivenessTimer = null;
   }
 
   /// 接続ごとの「Claude システムプロンプトファイル」設定をサーバの rc に反映する。
@@ -1169,6 +1231,7 @@ class TerminalConnectionNotifier
     _shellOutputReceived = false;
     resetIdleCounter();
     _stopClaudeDetectTimer();
+    _stopDesktopLivenessTimer();
     _flushTimer?.cancel();
     _flushTimer = null;
     _resizeGuardTimer?.cancel();

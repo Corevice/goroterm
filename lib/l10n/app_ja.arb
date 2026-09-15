@@ -133,6 +133,8 @@
   "renameSessionTitle": "セッション名を変更",
   "failedToRenameSession": "セッション名変更失敗: {error}",
   "tmuxOperationInProgress": "他のtmux操作を実行中です。しばらくしてからもう一度お試しください。",
+  "tmuxRefreshFailed": "更新できませんでした。接続を確認しています…",
+  "tmuxNotConnectedMessage": "接続が確立していません。再接続後にもう一度お試しください。",
   "openAllSessions": "{count} 個のセッションをすべて開く",
   "selectSessions": "選択",
   "openSelectedSessions": "選択した {count} 件を開く",

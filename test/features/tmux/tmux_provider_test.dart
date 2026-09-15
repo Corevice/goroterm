@@ -10,6 +10,7 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:xterm/xterm.dart';
 
+import 'package:terminal_ssh_app/core/error/app_error.dart';
 import 'package:terminal_ssh_app/core/ssh/ssh_channel_manager.dart';
 import 'package:terminal_ssh_app/features/terminal/terminal_connection_provider.dart';
 import 'package:terminal_ssh_app/features/tmux/tmux_provider.dart';
@@ -36,6 +37,24 @@ TerminalConnectionState _fakeConnState = const TerminalConnectionState();
 class _FakeTerminalConnectionNotifier extends TerminalConnectionNotifier {
   @override
   TerminalConnectionState build(String arg) => _fakeConnState;
+}
+
+/// Module-level counter incremented by [_CountingTerminalConnectionNotifier].
+/// Reset it before each test that uses that fake.
+int verifyConnectionAliveCallCount = 0;
+
+/// Fake that records verifyConnectionAlive() calls instead of running the
+/// real implementation (which would need a real/fake SshClientService).
+/// Used to verify _notifyConnectionMaybeDead()'s channel-open-timeout-only
+/// trigger without touching platform channels via the real build().
+class _CountingTerminalConnectionNotifier extends TerminalConnectionNotifier {
+  @override
+  TerminalConnectionState build(String arg) => const TerminalConnectionState();
+
+  @override
+  Future<void> verifyConnectionAlive() async {
+    verifyConnectionAliveCallCount++;
+  }
 }
 
 /// Mock SSHSession for stubbing stdout/stderr/done/exitCode without a real SSH server.
@@ -122,6 +141,42 @@ _MockSshChannelManager _makePartialSuccessManager() {
     if (cmd.contains('tmux -V')) return versionSession;
     // list-sessions or any other command → throws (simulates network failure)
     throw Exception('network error during list-sessions');
+  });
+  return m;
+}
+
+/// Returns a mock SshChannelManager, connected and available, whose
+/// kill-session/rename-session commands fail (exit 1, simulating "session
+/// not found") while new-session and everything else succeeds. Used by the
+/// "_isOperating always reset (error-path fix)" tests below, which need a
+/// real (non-notConnected) error path through _runExclusive to exercise the
+/// finally-block reset — now that a null channelManager throws before
+/// _isOperating is ever set, it can no longer stand in for that error path.
+_MockSshChannelManager _makeManagerWithFailingKillAndRename() {
+  final m = _MockSshChannelManager();
+  final cmdVSession = _makeSession(exitCode: 0);
+  final versionSession = _makeSession(
+    stdout: utf8.encode('tmux 3.3a\n'),
+    exitCode: null,
+  );
+  final emptyListSession = _makeSession(
+    exitCode: 1,
+    stderr: utf8.encode('no server running on /tmp/tmux\n'),
+  );
+  final failSession = _makeSession(
+    exitCode: 1,
+    stderr: utf8.encode("can't find session\n"),
+  );
+  final okSession = _makeSession(exitCode: 0);
+
+  when(() => m.executeCommand(any())).thenAnswer((invocation) async {
+    final cmd = invocation.positionalArguments[0] as String;
+    if (cmd.contains('command -v')) return cmdVSession;
+    if (cmd.contains('tmux -V')) return versionSession;
+    if (cmd.contains('list-sessions')) return emptyListSession;
+    if (cmd.contains('kill-session')) return failSession;
+    if (cmd.contains('rename-session')) return failSession;
+    return okSession; // new-session, set-option, etc.
   });
   return m;
 }
@@ -664,18 +719,25 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('_safeRefresh null-channelManager guard', () {
-    test('createSession with null channelManager does not throw', () async {
+    // Regression note: these three used to assert "does not throw" / "ran
+    // (true) as a silent no-op" when channelManager was null. That is no
+    // longer the contract — see "_runExclusive() throws TmuxError(notConnected)"
+    // below — so they now assert the throw instead.
+    test('createSession with null channelManager throws TmuxError(notConnected)',
+        () async {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
       await container.read(tmuxProvider('conn-1').future);
 
-      // _channelManager is null → createSession should return early, no throw.
+      // _channelManager is null → createSession must throw notConnected,
+      // regardless of swallowErrors, instead of silently no-op'ing.
       await expectLater(
         container
             .read(tmuxProvider('conn-1').notifier)
             .createSession('test-session'),
-        completes,
+        throwsA(isA<TmuxError>()
+            .having((e) => e.reason, 'reason', TmuxErrorReason.notConnected)),
       );
 
       // State must remain unchanged (TmuxNotConnected).
@@ -683,23 +745,28 @@ void main() {
       expect(state.value?.isAvailable, isFalse);
     });
 
-    test('killSession with null channelManager does not throw', () async {
+    test('killSession with null channelManager throws TmuxError(notConnected)',
+        () async {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
       await container.read(tmuxProvider('conn-1').future);
 
+      // killSession uses swallowErrors: true for command failures, but the
+      // notConnected check happens before that guard applies.
       await expectLater(
         container
             .read(tmuxProvider('conn-1').notifier)
             .killSession('some-session'),
-        completes,
+        throwsA(isA<TmuxError>()
+            .having((e) => e.reason, 'reason', TmuxErrorReason.notConnected)),
       );
 
       expect(container.read(tmuxProvider('conn-1')).value?.isAvailable, isFalse);
     });
 
-    test('renameSession with null channelManager does not throw', () async {
+    test('renameSession with null channelManager throws TmuxError(notConnected)',
+        () async {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
@@ -709,7 +776,8 @@ void main() {
         container
             .read(tmuxProvider('conn-1').notifier)
             .renameSession('old-name', 'new-name'),
-        completes,
+        throwsA(isA<TmuxError>()
+            .having((e) => e.reason, 'reason', TmuxErrorReason.notConnected)),
       );
 
       expect(container.read(tmuxProvider('conn-1')).value?.isAvailable, isFalse);
@@ -864,15 +932,24 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('killSession _isOperating always reset (error-path fix)', () {
+    // These tests need a real (connected) error path through _runExclusive —
+    // command failure, not the notConnected pre-check — to exercise the
+    // finally-block reset. See _makeManagerWithFailingKillAndRename().
+    setUpAll(() {
+      registerFallbackValue('');
+    });
+
     test('killSession can be called consecutively without deadlock', () async {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
       await container.read(tmuxProvider('conn-1').future);
       final notifier = container.read(tmuxProvider('conn-1').notifier);
+      notifier.setChannelManager(_makeManagerWithFailingKillAndRename());
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
-      // First call — channelManager is null → early return from try,
-      // finally must reset _isOperating.
+      // First call — kill-session fails (swallowErrors: true), finally must
+      // reset _isOperating regardless.
       await notifier.killSession('session-a');
 
       // Second call must not be blocked by a stuck _isOperating guard.
@@ -885,6 +962,8 @@ void main() {
 
       await container.read(tmuxProvider('conn-1').future);
       final notifier = container.read(tmuxProvider('conn-1').notifier);
+      notifier.setChannelManager(_makeManagerWithFailingKillAndRename());
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       await notifier.killSession('to-kill');
 
@@ -898,6 +977,8 @@ void main() {
 
       await container.read(tmuxProvider('conn-1').future);
       final notifier = container.read(tmuxProvider('conn-1').notifier);
+      notifier.setChannelManager(_makeManagerWithFailingKillAndRename());
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       await notifier.killSession('to-kill');
 
@@ -913,6 +994,8 @@ void main() {
 
       await container.read(tmuxProvider('conn-1').future);
       final notifier = container.read(tmuxProvider('conn-1').notifier);
+      notifier.setChannelManager(_makeManagerWithFailingKillAndRename());
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       // Three consecutive killSession calls — none should corrupt state.
       await notifier.killSession('session-1');
@@ -920,7 +1003,9 @@ void main() {
       await notifier.killSession('session-3');
 
       final state = container.read(tmuxProvider('conn-1'));
-      expect(state.value?.isAvailable, isFalse);
+      expect(state, isA<AsyncData<TmuxState>>(),
+          reason: 'state must stay AsyncData, never AsyncError');
+      expect(state.value?.isAvailable, isTrue);
     });
   });
 
@@ -2738,7 +2823,19 @@ void main() {
           return Future.value(noop);
         });
 
-        final container = ProviderContainer();
+        // Channel-open timeout now also calls verifyConnectionAlive() on
+        // terminalConnectionProvider (see _notifyConnectionMaybeDead) —
+        // override it with the fake so this test doesn't build the real
+        // TerminalConnectionNotifier (which touches platform channels via
+        // connectivityProvider and isn't set up in this test).
+        _fakeConnState = const TerminalConnectionState();
+        final container = ProviderContainer(
+          overrides: [
+            terminalConnectionProvider.overrideWith(
+              _FakeTerminalConnectionNotifier.new,
+            ),
+          ],
+        );
 
         container.read(tmuxProvider('timeout-latch'));
         async.flushMicrotasks();
@@ -2865,4 +2962,278 @@ void main() {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // refresh() Future<bool> contract (brief A-1 / test (a))
+  //
+  // true = state was updated with fresh info; false = channelManager missing
+  // or the fetch failed and the previous state was kept.
+  // ---------------------------------------------------------------------------
+
+  group('refresh() Future<bool> contract', () {
+    setUpAll(() {
+      registerFallbackValue('');
+    });
+
+    test('returns false when channelManager is null', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      await container.read(tmuxProvider('rb-null').future);
+      final notifier = container.read(tmuxProvider('rb-null').notifier);
+
+      expect(await notifier.refresh(), isFalse);
+    });
+
+    test('returns true when the fetch succeeds', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      await container.read(tmuxProvider('rb-ok').future);
+      final notifier = container.read(tmuxProvider('rb-ok').notifier);
+      notifier.setChannelManager(_makeFullSuccessManager());
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(await notifier.refresh(), isTrue);
+    });
+
+    test('returns false when the fetch fails, and preserves the previous state',
+        () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      await container.read(tmuxProvider('rb-err').future);
+      final notifier = container.read(tmuxProvider('rb-err').notifier);
+      // Succeeds for availability, throws for list-sessions.
+      notifier.setChannelManager(_makePartialSuccessManager());
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      final before = container.read(tmuxProvider('rb-err'));
+      expect(await notifier.refresh(), isFalse);
+      final after = container.read(tmuxProvider('rb-err'));
+      expect(after.value, equals(before.value),
+          reason: 'a failed refresh() must not change the previously held state');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // in-flight refresh() dedup (brief A-1 / test (b))
+  //
+  // Concurrent refresh() calls (manual button + auto-refresh timer +
+  // _safeRefresh-style callers) must join the same in-flight Future and issue
+  // exec only once, not once per caller.
+  // ---------------------------------------------------------------------------
+
+  group('refresh() in-flight dedup', () {
+    setUpAll(() {
+      registerFallbackValue('');
+    });
+
+    test('concurrent refresh() calls join into one exec and one Future',
+        () async {
+      final blockedCompleter = Completer<SSHSession>();
+      final cmdV = _makeSession(exitCode: 0);
+      final version =
+          _makeSession(stdout: utf8.encode('tmux 3.3a\n'), exitCode: null);
+      final initListSession = _makeSession(
+        stdout: utf8.encode('work|||1|||0|||1700000000\n'),
+        exitCode: 0,
+      );
+      var listCalls = 0;
+
+      final m = _MockSshChannelManager();
+      when(() => m.executeCommand(any())).thenAnswer((inv) {
+        final cmd = inv.positionalArguments[0] as String;
+        if (cmd.contains('command -v')) return Future.value(cmdV);
+        if (cmd.contains('tmux -V')) return Future.value(version);
+        if (cmd.contains('list-sessions')) {
+          listCalls++;
+          // First call is _initializeState's own fetch (from
+          // setChannelManager) — resolve it immediately so setup finishes.
+          // Every call from here on (i.e. the refresh() calls under test)
+          // blocks, so we can observe how many are actually issued.
+          if (listCalls == 1) return Future.value(initListSession);
+          return blockedCompleter.future;
+        }
+        return Future.value(_makeSession(exitCode: 0));
+      });
+
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      await container.read(tmuxProvider('refresh-dedup').future);
+      final notifier = container.read(tmuxProvider('refresh-dedup').notifier);
+      notifier.setChannelManager(m);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(listCalls, 1, reason: 'setup: _initializeState must have run once');
+
+      // Two concurrent refresh() calls before the exec resolves.
+      final f1 = notifier.refresh();
+      final f2 = notifier.refresh();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(identical(f1, f2), isTrue,
+          reason: 'concurrent refresh() calls must return the same in-flight Future');
+      expect(listCalls, 2,
+          reason: 'only one additional exec must be issued for both callers combined');
+
+      blockedCompleter.complete(_makeSession(exitCode: 0));
+      final results = await Future.wait([f1, f2]);
+      expect(results, [true, true]);
+
+      // A refresh() called after the in-flight one completes must run again
+      // (not stay joined to the finished Future).
+      final f3 = notifier.refresh();
+      expect(identical(f1, f3), isFalse);
+      await f3;
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // verifyConnectionAlive() is called on channel-open timeout only
+  // (brief A-3 / test (d))
+  //
+  // A channel-open timeout (_channelOpenTimeout, 10 s) is a strong signal the
+  // connection is dead and must trigger TerminalConnectionNotifier's active
+  // liveness check. A stdout/stderr read timeout (the command was just slow)
+  // must not.
+  // ---------------------------------------------------------------------------
+
+  group('verifyConnectionAlive() is called only for a channel-open timeout', () {
+    setUpAll(() {
+      registerFallbackValue('');
+    });
+
+    setUp(() {
+      verifyConnectionAliveCallCount = 0;
+    });
+
+    test('channel-open timeout calls verifyConnectionAlive() exactly once',
+        () {
+      fakeAsync((async) {
+        final cmdV = _makeSession(exitCode: 0);
+        final version =
+            _makeSession(stdout: utf8.encode('tmux 3.3a\n'), exitCode: null);
+        final noServerList = _makeSession(
+          exitCode: 1,
+          stderr: utf8.encode('no server running\n'),
+        );
+        final hangingCompleter = Completer<SSHSession>();
+
+        final m = _MockSshChannelManager();
+        when(() => m.executeCommand(any())).thenAnswer((inv) {
+          final cmd = inv.positionalArguments[0] as String;
+          if (cmd.contains('command -v')) return Future.value(cmdV);
+          if (cmd.contains('tmux -V')) return Future.value(version);
+          if (cmd.contains('list-sessions')) return Future.value(noServerList);
+          if (cmd.contains('new-session')) return hangingCompleter.future;
+          return Future.value(_makeSession(exitCode: 0));
+        });
+
+        final container = ProviderContainer(
+          overrides: [
+            terminalConnectionProvider.overrideWith(
+              _CountingTerminalConnectionNotifier.new,
+            ),
+          ],
+        );
+
+        container.read(tmuxProvider('verify-open-timeout'));
+        async.flushMicrotasks();
+        final notifier =
+            container.read(tmuxProvider('verify-open-timeout').notifier);
+        notifier.setChannelManager(m);
+        async.flushMicrotasks();
+
+        Object? caughtError;
+        unawaited(notifier.createSession('stuck-open').catchError((e) {
+          caughtError = e;
+          return false;
+        }));
+        async.flushMicrotasks();
+
+        // Advance past the 10 s channel-open timeout budget.
+        async.elapse(const Duration(seconds: 10));
+        async.flushMicrotasks();
+
+        expect(caughtError, isA<TimeoutException>());
+        expect(verifyConnectionAliveCallCount, 1,
+            reason: 'a channel-open timeout is a strong dead-connection signal');
+
+        // Let the abandoned channel resolve so the test tears down cleanly.
+        hangingCompleter.complete(_makeSession(exitCode: 0));
+        async.flushMicrotasks();
+        container.dispose();
+      });
+    });
+
+    test('stdout/stderr read timeout does not call verifyConnectionAlive()',
+        () {
+      fakeAsync((async) {
+        final cmdV = _makeSession(exitCode: 0);
+        final version =
+            _makeSession(stdout: utf8.encode('tmux 3.3a\n'), exitCode: null);
+        final noServerList = _makeSession(
+          exitCode: 1,
+          stderr: utf8.encode('no server running\n'),
+        );
+
+        // The exec channel opens immediately, but stdout/stderr never emit
+        // or close — simulates a command that is just slow, not a dead
+        // connection. Non-broadcast controllers are fine: stdout/stderr are
+        // each read exactly once.
+        final neverStdout = StreamController<Uint8List>();
+        final neverStderr = StreamController<Uint8List>();
+        addTearDown(neverStdout.close);
+        addTearDown(neverStderr.close);
+        final hangingReadSession = _MockSSHSession();
+        when(() => hangingReadSession.stdout)
+            .thenAnswer((_) => neverStdout.stream);
+        when(() => hangingReadSession.stderr)
+            .thenAnswer((_) => neverStderr.stream);
+        when(() => hangingReadSession.close()).thenReturn(null);
+
+        final m = _MockSshChannelManager();
+        when(() => m.executeCommand(any())).thenAnswer((inv) {
+          final cmd = inv.positionalArguments[0] as String;
+          if (cmd.contains('command -v')) return Future.value(cmdV);
+          if (cmd.contains('tmux -V')) return Future.value(version);
+          if (cmd.contains('list-sessions')) return Future.value(noServerList);
+          if (cmd.contains('new-session')) {
+            return Future.value(hangingReadSession);
+          }
+          return Future.value(_makeSession(exitCode: 0));
+        });
+
+        final container = ProviderContainer(
+          overrides: [
+            terminalConnectionProvider.overrideWith(
+              _CountingTerminalConnectionNotifier.new,
+            ),
+          ],
+        );
+
+        container.read(tmuxProvider('verify-read-timeout'));
+        async.flushMicrotasks();
+        final notifier =
+            container.read(tmuxProvider('verify-read-timeout').notifier);
+        notifier.setChannelManager(m);
+        async.flushMicrotasks();
+
+        Object? caughtError;
+        unawaited(notifier.createSession('stuck-read').catchError((e) {
+          caughtError = e;
+          return false;
+        }));
+        async.flushMicrotasks();
+
+        // The channel opened immediately (well under the 10 s channel-open
+        // budget); advance past _runCommand's 15 s stdout/stderr read
+        // timeout instead.
+        async.elapse(const Duration(seconds: 15));
+        async.flushMicrotasks();
+
+        expect(caughtError, isA<TimeoutException>());
+        expect(verifyConnectionAliveCallCount, 0,
+            reason: 'a slow command must not be treated as a dead-connection signal');
+
+        container.dispose();
+      });
+    });
+  });
 }

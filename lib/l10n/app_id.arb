@@ -133,6 +133,8 @@
   "renameSessionTitle": "Ganti Nama Sesi",
   "failedToRenameSession": "Gagal mengganti nama sesi: {error}",
   "tmuxOperationInProgress": "Operasi tmux lain sedang berlangsung. Silakan coba lagi.",
+  "tmuxRefreshFailed": "Tidak dapat memperbarui. Memeriksa koneksi…",
+  "tmuxNotConnectedMessage": "Belum terhubung. Silakan coba lagi setelah tersambung kembali.",
   "openAllSessions": "Buka semua {count} sesi",
   "selectSessions": "Pilih",
   "openSelectedSessions": "Buka {count} terpilih",
