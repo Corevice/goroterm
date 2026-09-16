@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:dartssh2/dartssh2.dart';
@@ -31,6 +32,53 @@ class SshClientService {
   final Future<SSHSession> Function(String command)? _executeFactory;
   SSHClient? _client;
 
+  // ---------------------------------------------------------------------
+  // 秘密鍵パース結果のキャッシュ。
+  //
+  // ネイティブタブを多数開いていると、各タブ (= 各エンジン) が独自の
+  // SshClientService を持つ。スリープ復帰後の同時再接続で、同じ
+  // privateKeyPem/passphrase の組を毎回 SSHKeyPair.fromPem() で再パース
+  // すると、パスフレーズ付き鍵の bcrypt-pbkdf (純 Dart) がメインスレッド上
+  // で何十回も同時に走り、UI が固まる。パース結果は決定的なので、
+  // pem+passphrase の組をキーにメモリ内キャッシュして再パースを避ける。
+  // 永続化はしない（プロセス内メモリのみ）。上限を超えたら最古のエントリ
+  // (最も長く未使用) を破棄する単純な LRU。
+  static const int _maxKeyPairCacheEntries = 32;
+  static final LinkedHashMap<String, List<SSHKeyPair>> _keyPairCache =
+      LinkedHashMap<String, List<SSHKeyPair>>();
+
+  /// テストからパース回数を数えられるよう差し替え可能にしたパーサ。
+  /// 既定は [SSHKeyPair.fromPem]。
+  @visibleForTesting
+  static List<SSHKeyPair> Function(String pem, String? passphrase)
+      keyPairParser = SSHKeyPair.fromPem;
+
+  /// テスト専用: キャッシュを空にする。
+  @visibleForTesting
+  static void clearKeyPairCache() => _keyPairCache.clear();
+
+  static String _keyPairCacheKey(String pem, String? passphrase) =>
+      '$pem\u0000${passphrase ?? ''}';
+
+  /// [pem]/[passphrase] の組でキャッシュを引き、無ければ [keyPairParser] で
+  /// パースしてキャッシュする。パース結果に含まれる秘密鍵そのものやキーに
+  /// 使う文字列はログに出さない。
+  static List<SSHKeyPair> _parseKeyPairCached(String pem, String? passphrase) {
+    final cacheKey = _keyPairCacheKey(pem, passphrase);
+    final cached = _keyPairCache.remove(cacheKey);
+    if (cached != null) {
+      // LinkedHashMap: 削除して入れ直すことで最近使った扱いにする (LRU)。
+      _keyPairCache[cacheKey] = cached;
+      return cached;
+    }
+    final parsed = keyPairParser(pem, passphrase);
+    _keyPairCache[cacheKey] = parsed;
+    if (_keyPairCache.length > _maxKeyPairCacheEntries) {
+      _keyPairCache.remove(_keyPairCache.keys.first);
+    }
+    return parsed;
+  }
+
   SSHClient? get client => _client;
   bool get isConnected => _client != null && !_client!.isClosed;
 
@@ -44,6 +92,16 @@ class SshClientService {
         onHostKeyMismatch,
   }) async {
     try {
+      // 秘密鍵のパース (bcrypt-pbkdf 等で数百ms〜数秒かかることがある) は
+      // ソケット接続より先に行う。キャッシュヒットすればほぼ 0 コストになり、
+      // 多数のタブが同時に再接続してもメインスレッドの同時多発パースを
+      // 避けられる。ソケット接続の成否に関わらずパースだけは完了させたい
+      // ので、この順序は意図的。
+      final identities =
+          config.authMethod == AuthMethod.key && privateKeyPem != null
+              ? _parseKeyPairCached(privateKeyPem, passphrase)
+              : null;
+
       // TCP keepalive 付きカスタムソケットを使用。
       // OS カーネルがバックグラウンドでも keepalive パケットを送信し、
       // NAT テーブルの有効期限切れを防ぐ。
@@ -59,9 +117,7 @@ class SshClientService {
         onPasswordRequest: config.authMethod == AuthMethod.password
             ? () => password
             : null,
-        identities: config.authMethod == AuthMethod.key && privateKeyPem != null
-            ? SSHKeyPair.fromPem(privateKeyPem, passphrase)
-            : null,
+        identities: identities,
         onVerifyHostKey: (type, fingerprint) async {
           return verifyHostKey(
             config.host,

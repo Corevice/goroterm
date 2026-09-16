@@ -4894,6 +4894,181 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
+  // checkConnection(staggered) jitter delay (brief B-2 / test (a))
+  //
+  // staggered: true (the app-resume path in terminal_screen.dart) must wait
+  // jitterProvider(4s) before sending the first keepAlive probe, so that
+  // many native-tab windows resuming at the same instant don't all probe on
+  // the same tick. staggered: false (the default) and verifyConnectionAlive()
+  // (the tmux-triggered strong signal) must stay immediate.
+  // ---------------------------------------------------------------------------
+
+  group('checkConnection(staggered) jitter delay', () {
+    late ProviderContainer container;
+    late TerminalConnectionNotifier notifier;
+    late _CountingSshClientService countingService;
+
+    setUp(() {
+      container = makeContainer();
+      notifier = container.read(
+        terminalConnectionProvider('stagger-jitter-test').notifier,
+      );
+      countingService = _CountingSshClientService();
+    });
+
+    tearDown(() {
+      container.dispose();
+      TerminalConnectionNotifier.jitterProvider = (_) => Duration.zero;
+    });
+
+    test(
+        'staggered: true delays the first keepAlive probe by jitterProvider(4s)',
+        () {
+      fakeAsync((async) {
+        TerminalConnectionNotifier.jitterProvider =
+            (_) => const Duration(seconds: 2);
+        notifier.initConnectedStateForTesting(
+          sshService: countingService,
+          connectedState: const TerminalConnectionState(
+            status: ConnectionStatus.connected,
+            hostLabel: 'test-host',
+          ),
+          config: const ConnectionConfig(
+            label: 'test', host: '127.0.0.1', username: 'u',
+          ),
+        );
+
+        notifier.checkConnection(staggered: true);
+
+        async.elapse(const Duration(milliseconds: 1999));
+        expect(countingService.keepAliveCount, 0,
+            reason: 'probe must not fire before the jitter delay elapses');
+
+        async.elapse(const Duration(milliseconds: 1));
+        expect(countingService.keepAliveCount, 1,
+            reason: 'probe must fire once the jitter delay elapses');
+      });
+    });
+
+    test(
+        'staggered: false (the default) sends the keepAlive probe '
+        'immediately, ignoring jitterProvider', () async {
+      TerminalConnectionNotifier.jitterProvider =
+          (_) => const Duration(seconds: 2);
+      notifier.initConnectedStateForTesting(
+        sshService: countingService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+        config: const ConnectionConfig(
+          label: 'test', host: '127.0.0.1', username: 'u',
+        ),
+      );
+
+      await notifier.checkConnection();
+
+      expect(countingService.keepAliveCount, 1,
+          reason: 'staggered: false must not wait on jitterProvider');
+    });
+
+    test(
+        'verifyConnectionAlive() sends the keepAlive probe immediately, '
+        'ignoring jitterProvider', () async {
+      TerminalConnectionNotifier.jitterProvider =
+          (_) => const Duration(seconds: 2);
+      notifier.initConnectedStateForTesting(
+        sshService: countingService,
+        connectedState: const TerminalConnectionState(
+          status: ConnectionStatus.connected,
+          hostLabel: 'test-host',
+        ),
+        config: const ConnectionConfig(
+          label: 'test', host: '127.0.0.1', username: 'u',
+        ),
+      );
+
+      await notifier.verifyConnectionAlive();
+
+      expect(countingService.keepAliveCount, 1,
+          reason:
+              'verifyConnectionAlive() (tmux-triggered) must stay immediate '
+              'since the caller already waited 10s');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Desktop liveness timer initial jitter (brief B-3)
+  //
+  // _startDesktopLivenessTimerIfNeeded() must delay the *first* start of the
+  // 30s periodic timer by jitterProvider(30s), so that many windows
+  // connecting at the same instant don't all send activeKeepAlive() on the
+  // same phase. After the initial delay, the timer still ticks every 30s.
+  // ---------------------------------------------------------------------------
+
+  group('desktop liveness timer initial jitter', () {
+    late ProviderContainer container;
+    late TerminalConnectionNotifier notifier;
+
+    setUp(() {
+      container = makeContainer();
+      notifier = container.read(
+        terminalConnectionProvider('liveness-jitter-test').notifier,
+      );
+    });
+
+    tearDown(() {
+      container.dispose();
+      TerminalConnectionNotifier.jitterProvider = (_) => Duration.zero;
+    });
+
+    test(
+        'periodic keepAlive starts only after the initial jitter delay, '
+        'then ticks every 30s', () {
+      fakeAsync((async) {
+        TerminalConnectionNotifier.jitterProvider =
+            (_) => const Duration(seconds: 10);
+        final countingService = _CountingSshClientService();
+        notifier.initConnectedStateForTesting(
+          sshService: countingService,
+          connectedState: const TerminalConnectionState(
+            status: ConnectionStatus.connected,
+            hostLabel: 'test-host',
+          ),
+          config: const ConnectionConfig(
+            label: 'test', host: '127.0.0.1', username: 'u',
+          ),
+        );
+        notifier.callSetConnectedStateForTesting(Terminal(maxLines: 50));
+        async.flushMicrotasks();
+
+        // Before the 10s initial jitter elapses, the periodic timer has not
+        // even started, so no activeKeepAlive() call has happened.
+        async.elapse(const Duration(seconds: 9));
+        async.flushMicrotasks();
+        expect(countingService.keepAliveCount, 0,
+            reason:
+                'periodic timer must not start before the initial jitter');
+
+        // The periodic timer starts at t=10s; its first tick is one full
+        // period (30s) later, i.e. at t=40s. elapse(30s) from t=9s reaches
+        // t=39s, still short of the first tick.
+        async.elapse(const Duration(seconds: 30));
+        async.flushMicrotasks();
+        expect(countingService.keepAliveCount, 0,
+            reason: 'first periodic tick must not fire before t=40s '
+                '(10s jitter + 30s period)');
+
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(countingService.keepAliveCount, 1,
+            reason: 'first periodic tick fires at t=40s '
+                '(10s jitter + 30s period)');
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // verifyConnectionAlive() dedup guard (brief B-1 / test (h))
   //
   // verifyConnectionAlive() is a thin wrapper around checkConnection(), which
