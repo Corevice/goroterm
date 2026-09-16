@@ -301,7 +301,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         for (final session in sessions) {
           ref
               .read(terminalConnectionProvider(session.sessionId).notifier)
-              .checkConnection();
+              .checkConnection(staggered: true);
         }
       });
 

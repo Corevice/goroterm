@@ -235,7 +235,7 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
       runningKeys.insert(key)
       if spinnerTimer == nil {
         spinnerTimer = Timer.scheduledTimer(
-          withTimeInterval: 0.12, repeats: true
+          withTimeInterval: 0.25, repeats: true
         ) { [weak self] _ in
           self?.tickSpinner()
         }
@@ -254,6 +254,14 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
   }
 
   private func tickSpinner() {
+    // セッションウィンドウが1つも画面に見えていなければ（スリープ・画面オフ・
+    // 全ウィンドウが他アプリの裏に隠れている等）、タブバーの再レイアウトを
+    // スキップする。タブが多いと毎 tick のタイトル書き換えでタブバーの
+    // 再レイアウトが走り、見えていないのにメインスレッドの負荷になるため。
+    let anyVisible = controllers.keys.contains { $0.occlusionState.contains(.visible) }
+    if !anyVisible {
+      return
+    }
     spinnerFrame = (spinnerFrame + 1) % spinnerFrames.count
     let frame = spinnerFrames[spinnerFrame]
     for key in runningKeys {

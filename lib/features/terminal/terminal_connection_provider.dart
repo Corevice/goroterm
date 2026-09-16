@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -131,6 +132,26 @@ class TerminalConnectionNotifier
   /// 確実にキャンセルされるため、原則としてテスト側で操作する必要はない。
   @visibleForTesting
   static bool desktopLivenessTimerEnabled = true;
+
+  /// スリープ復帰・生存確認タイマーの初期位相をずらすための jitter。
+  ///
+  /// ネイティブタブを多数開いていると、各タブ (= 各エンジン) が同時刻に
+  /// resume / 生存確認タイマーの発火を迎え、keepAlive probe や再接続が
+  /// 全ウィンドウ同時多発でメインスレッドに集中してしまう。呼び出し側は
+  /// `jitterProvider(max)` で 0〜[max] の遅延を取得し、処理開始前に挟むこと
+  /// で位相をずらす。既定は一様乱数。テストでは
+  /// test/flutter_test_config.dart で `Duration.zero` を返す実装に差し替えて
+  /// 既存の fakeAsync タイミングを壊さないようにしている。
+  @visibleForTesting
+  static Duration Function(Duration max) jitterProvider =
+      _defaultJitterProvider;
+
+  static final Random _jitterRandom = Random();
+
+  static Duration _defaultJitterProvider(Duration max) {
+    if (max <= Duration.zero) return Duration.zero;
+    return Duration(milliseconds: _jitterRandom.nextInt(max.inMilliseconds + 1));
+  }
 
 
   // Batch output buffer: accumulates SSH stdout chunks and flushes periodically.
@@ -658,17 +679,25 @@ class TerminalConnectionNotifier
   /// 同時に 1 本しか走らないよう [_isCheckingConnection] で合流する
   /// ([verifyConnectionAlive] からの呼び出しもこのガードを通る) —
   /// resume 直後に複数箇所から呼ばれても keepAlive probe が重複しない。
-  Future<void> checkConnection() async {
+  ///
+  /// [staggered] が true のときは keepAlive probe を送る前に
+  /// [jitterProvider] による遅延を挟む。ネイティブタブを多数開いている環境で
+  /// 全ウィンドウが resume で同時に probe を送ると、メインスレッドの同時多発
+  /// 処理でアプリが固まるため、resume 経由の呼び出しは位相をずらす。
+  /// [verifyConnectionAlive] 経由 (tmux 側からの強いシグナル) は
+  /// ユーザーが既に待たされているため従来どおり即時に送る (staggered: false)。
+  /// delay の間も [_isCheckingConnection] ガードは保持されたままになる。
+  Future<void> checkConnection({bool staggered = false}) async {
     if (_isCheckingConnection) return;
     _isCheckingConnection = true;
     try {
-      await _checkConnectionCore();
+      await _checkConnectionCore(staggered: staggered);
     } finally {
       _isCheckingConnection = false;
     }
   }
 
-  Future<void> _checkConnectionCore() async {
+  Future<void> _checkConnectionCore({bool staggered = false}) async {
     if (_isReconnecting) return;
     if (state.status == ConnectionStatus.reconnecting) return;
     if (state.status == ConnectionStatus.connecting) return;
@@ -689,6 +718,12 @@ class TerminalConnectionNotifier
       if (service == null) {
         _onDisconnected();
         return;
+      }
+
+      if (staggered) {
+        await Future.delayed(jitterProvider(const Duration(seconds: 4)));
+        if (!identical(service, _sshService)) return; // 差し替わった
+        if (state.status != ConnectionStatus.connected) return; // 状態が変わった
       }
 
       // keepAlive probe（2 回、Wi-Fi 復帰を待つ）
@@ -1147,8 +1182,14 @@ class TerminalConnectionNotifier
     if (!desktopLivenessTimerEnabled) return;
     if (kIsWeb) return;
     if (!(Platform.isMacOS || Platform.isWindows || Platform.isLinux)) return;
-    _desktopLivenessTimer = Timer.periodic(_desktopLivenessInterval, (_) {
-      activeKeepAlive();
+    // ネイティブタブを多数開いていると、全ウィンドウがほぼ同時刻に接続し、
+    // 30 秒周期の生存確認タイマーが同位相で発火して keepAlive probe が
+    // 同時多発する。初回起動を jitter 分だけ遅らせ、ウィンドウごとに初期
+    // 位相をずらしてから周期タイマーを開始する。
+    _desktopLivenessTimer = Timer(jitterProvider(_desktopLivenessInterval), () {
+      _desktopLivenessTimer = Timer.periodic(_desktopLivenessInterval, (_) {
+        activeKeepAlive();
+      });
     });
   }
 

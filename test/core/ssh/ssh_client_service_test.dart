@@ -1011,6 +1011,157 @@ AK9jJFzpo0q4FnYkalW4fo/nosGUM/bq5LR2M=
   });
 
   // =====================================================================
+  // ssh_client_service.dart — private key parse cache (brief A)
+  //
+  // connect() parses privateKeyPem/passphrase via SSHKeyPair.fromPem()
+  // *before* opening the socket (see the reordering in connect()), and
+  // caches the result keyed by (pem, passphrase). These tests use a
+  // socketFactory that always fails, so connect() always throws
+  // NetworkError — that lets us assert on [SshClientService.keyPairParser]
+  // call counts without a real SSH handshake, while still proving the
+  // parse happens before the (failing) socket connect.
+  // =====================================================================
+  group('SshClientService key pair cache', () {
+    late MockKnownHostsStore mockStore;
+
+    setUp(() {
+      mockStore = MockKnownHostsStore();
+      SshClientService.clearKeyPairCache();
+    });
+
+    tearDown(() {
+      SshClientService.keyPairParser = SSHKeyPair.fromPem;
+      SshClientService.clearKeyPairCache();
+    });
+
+    SshClientService makeService() => SshClientService(
+          knownHostsStore: mockStore,
+          socketFactory: (host, port, {timeout}) => Future.error(
+            const SocketException('simulated: no real handshake needed'),
+          ),
+        );
+
+    final keyConfig = ConnectionConfig(
+      label: 'Test',
+      host: '127.0.0.1',
+      username: 'user',
+      authMethod: AuthMethod.key,
+    );
+
+    test('same pem/passphrase across two connect() calls parses only once',
+        () async {
+      var callCount = 0;
+      SshClientService.keyPairParser = (pem, passphrase) {
+        callCount++;
+        return SSHKeyPair.fromPem(_ed25519Unencrypted);
+      };
+      final service = makeService();
+
+      await expectLater(
+        service.connect(
+          config: keyConfig,
+          password: null,
+          privateKeyPem: _ed25519Unencrypted,
+        ),
+        throwsA(isA<NetworkError>()),
+      );
+      await expectLater(
+        service.connect(
+          config: keyConfig,
+          password: null,
+          privateKeyPem: _ed25519Unencrypted,
+        ),
+        throwsA(isA<NetworkError>()),
+      );
+
+      expect(callCount, 1,
+          reason: 'second connect() with the same pem/passphrase must hit '
+              'the cache instead of re-parsing');
+    });
+
+    test('different passphrase for the same pem creates a separate cache entry',
+        () async {
+      var callCount = 0;
+      SshClientService.keyPairParser = (pem, passphrase) {
+        callCount++;
+        return SSHKeyPair.fromPem(_ed25519Unencrypted);
+      };
+      final service = makeService();
+
+      await expectLater(
+        service.connect(
+          config: keyConfig,
+          password: null,
+          privateKeyPem: _ed25519Unencrypted,
+          passphrase: 'passphrase-a',
+        ),
+        throwsA(isA<NetworkError>()),
+      );
+      await expectLater(
+        service.connect(
+          config: keyConfig,
+          password: null,
+          privateKeyPem: _ed25519Unencrypted,
+          passphrase: 'passphrase-b',
+        ),
+        throwsA(isA<NetworkError>()),
+      );
+
+      expect(callCount, 2,
+          reason: 'a different passphrase must not reuse the previous '
+              'cache entry');
+    });
+
+    test('clearKeyPairCache() forces the next connect() to re-parse',
+        () async {
+      var callCount = 0;
+      SshClientService.keyPairParser = (pem, passphrase) {
+        callCount++;
+        return SSHKeyPair.fromPem(_ed25519Unencrypted);
+      };
+      final service = makeService();
+
+      // First establish that the cache is actually in effect: two calls
+      // with the same pem/passphrase before any clear must still parse only
+      // once (otherwise this test would pass even with caching removed
+      // entirely, since callCount would simply be 1 → 2 either way).
+      await expectLater(
+        service.connect(
+          config: keyConfig,
+          password: null,
+          privateKeyPem: _ed25519Unencrypted,
+        ),
+        throwsA(isA<NetworkError>()),
+      );
+      await expectLater(
+        service.connect(
+          config: keyConfig,
+          password: null,
+          privateKeyPem: _ed25519Unencrypted,
+        ),
+        throwsA(isA<NetworkError>()),
+      );
+      expect(callCount, 1,
+          reason: 'cache must dedupe repeated connect() calls before the '
+              'cache is cleared');
+
+      SshClientService.clearKeyPairCache();
+
+      await expectLater(
+        service.connect(
+          config: keyConfig,
+          password: null,
+          privateKeyPem: _ed25519Unencrypted,
+        ),
+        throwsA(isA<NetworkError>()),
+      );
+      expect(callCount, 2,
+          reason: 'clearKeyPairCache() must force a re-parse on the next '
+              'connect()');
+    });
+  });
+
+  // =====================================================================
   // known_hosts_store.dart
   // =====================================================================
   group('KnownHostsStore', () {
