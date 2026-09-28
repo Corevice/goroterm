@@ -437,7 +437,7 @@ final class MouseButtonStateRepair {
     // 右ボタン (bit 1) が実際には押されていないなら、Flutter 側で立ったまま
     // かもしれないので Up を合成して確実に下ろす。
     if pressed & (1 << 1) == 0 {
-      if let synthetic = syntheticUpEvent(buttonNumber: 1, cgType: .rightMouseUp) {
+      if let synthetic = syntheticUpEvent(like: event, buttonNumber: 1, cgType: .rightMouseUp) {
         if shouldLog {
           NSLog("MouseButtonStateRepair: synthesized rightMouseUp")
         }
@@ -448,7 +448,7 @@ final class MouseButtonStateRepair {
     // サイドボタン等 (bit 2〜4) も同様に点検する。
     for buttonNumber in 2...4 {
       if pressed & (1 << buttonNumber) == 0 {
-        if let synthetic = syntheticUpEvent(buttonNumber: buttonNumber, cgType: .otherMouseUp) {
+        if let synthetic = syntheticUpEvent(like: event, buttonNumber: buttonNumber, cgType: .otherMouseUp) {
           if shouldLog {
             NSLog("MouseButtonStateRepair: synthesized otherMouseUp(\(buttonNumber))")
           }
@@ -458,8 +458,9 @@ final class MouseButtonStateRepair {
     }
   }
 
-  /// 指定ボタン番号の Up イベントを CGEvent 経由で合成する。位置は Flutter
-  /// 側で hover 相当として処理されるだけなので厳密でなくてよい。
+  /// 指定ボタン番号の Up イベントを CGEvent 経由で合成する。Flutter 側では
+  /// hover として処理されるため、位置は元のクリック位置と一致させる必要が
+  /// ある (下記「位置について」参照)。
   ///
   /// 注意: `CGMouseButton` は `.left`/`.right`/`.center` の3値しか持たない
   /// Swift enum で、4番目以降のサイドボタンを rawValue から直接作ろうとする
@@ -467,12 +468,25 @@ final class MouseButtonStateRepair {
   /// する。そのため `mouseButton:` にはダミーの有効値を渡してイベントを
   /// 作ってから、`setIntegerValueField(.mouseEventButtonNumber:)` で
   /// `NSEvent.buttonNumber` が読む実体のフィールドを上書きする。
-  private func syntheticUpEvent(buttonNumber: Int, cgType: CGEventType) -> NSEvent? {
-    let location = NSEvent.mouseLocation
+  ///
+  /// 位置について (v1.3.88 の不具合): `NSEvent(cgEvent:)` で作ったイベントは
+  /// `window` が nil で、`locationInWindow` は「スクリーン座標 (左下原点)」を
+  /// 返す。一方 Flutter エンジンは `locationInWindow` を常に「ウィンドウ座標」
+  /// として `convertPoint:fromView:nil` に渡すため、スクリーン座標をそのまま
+  /// 入れるとウィンドウの画面上の原点ぶん (Dock の上に置いた窓なら約 50pt 上)
+  /// ずれた位置に hover が飛び、直前まで指していたボタンとは別のボタンが
+  /// ハイライトされる (実機で観測)。そこで、合成イベントの `locationInWindow`
+  /// が **元のクリックイベントのウィンドウ座標と一致する** ように、CG 座標へは
+  /// 「ウィンドウ座標を主画面の高さで上下反転した値」を渡す。timestamp と
+  /// 修飾キーも元イベントから引き継ぐ。
+  private func syntheticUpEvent(
+    like source: NSEvent, buttonNumber: Int, cgType: CGEventType
+  ) -> NSEvent? {
+    let locationInWindow = source.locationInWindow
+    // NSEvent(cgEvent:) は主画面 (NSScreen.screens.first) の高さで Y を
+    // 反転して Cocoa 座標に戻す。その逆変換をここで行う。
     let screenHeight = NSScreen.screens.first?.frame.height ?? 0
-    // NSEvent.mouseLocation は左下原点 (Cocoa 座標)。CGEvent は左上原点
-    // なので Y を反転する。
-    let cgPoint = CGPoint(x: location.x, y: screenHeight - location.y)
+    let cgPoint = CGPoint(x: locationInWindow.x, y: screenHeight - locationInWindow.y)
 
     guard let cgEvent = CGEvent(
       mouseEventSource: nil,
@@ -483,6 +497,8 @@ final class MouseButtonStateRepair {
       return nil
     }
     cgEvent.setIntegerValueField(.mouseEventButtonNumber, value: Int64(buttonNumber))
+    cgEvent.timestamp = CGEventTimestamp(source.timestamp * 1_000_000_000)
+    cgEvent.flags = CGEventFlags(rawValue: UInt64(source.modifierFlags.rawValue))
     return NSEvent(cgEvent: cgEvent)
   }
 }
