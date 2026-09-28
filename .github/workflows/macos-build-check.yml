@@ -45,3 +45,21 @@ jobs:
 
       - name: Build macOS app (Release, ad-hoc signed)
         run: flutter build macos --release
+
+      # 実機 (device lab の Mac) にインストールして手動検証できるように、
+      # ビルド成果物 (.app) を zip 化してアーティファクトに残す。
+      # ditto -c -k --keepParent は Finder の「圧縮」と同じ形式で、
+      # .app バンドルの構造 (シンボリックリンク・リソースフォーク含む) を
+      # 壊さずに zip 化できる。
+      - name: Archive app bundle
+        run: |
+          ditto -c -k --keepParent \
+            build/macos/Build/Products/Release/*.app \
+            goroterm-macos-adhoc.zip
+
+      - name: Upload app bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: goroterm-macos-adhoc
+          path: goroterm-macos-adhoc.zip
+          retention-days: 7

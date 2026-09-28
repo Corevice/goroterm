@@ -1,4 +1,5 @@
 import Cocoa
+import CoreGraphics
 import FlutterMacOS
 import UserNotifications
 
@@ -366,6 +367,122 @@ class MainFlutterWindow: NSWindow {
     // セッションタブ合流判定と食い違うのを防ぐ。
     self.isRestorable = false
 
+    // マウスボタン状態の自動修復モニタ (アプリ全体で 1 つ)。メインウィンドウは
+    // 起動時に必ず 1 回だけ生成されるので、ここで install する。
+    // AppDelegate.applicationDidFinishLaunching は FlutterAppDelegate が
+    // 実装していない (override/super の扱いが不確か) ため使わない。
+    MouseButtonStateRepair.shared.install()
+
     super.awakeFromNib()
+  }
+}
+
+// MARK: - マウスボタン状態の自動修復
+//
+// 症状: アプリバーの各ボタンにホバーするとツールチップは出る (= マウス移動
+// イベントは Flutter に届き、ヒットテストも正しい) のに、クリックしても
+// 何も起きなくなることがある。
+//
+// 原因: Flutter macOS エンジン (FlutterViewController.mm) は各ウィンドウごとに
+// 「今どのボタンが押されているか」を表す `_mouseState.buttons` というビット
+// 集合を自前で持ち、mouseDown/rightMouseDown/otherMouseDown で立てたビットを
+// 対応する mouseUp/rightMouseUp/otherMouseUp でしか下ろさない。Mission
+// Control・デスクトップ切替・別ウィンドウへの遷移などに割り当てたマウスの
+// 右ボタン/サイドボタンでは、押した後の Up イベントが同じ
+// FlutterViewController に届かないことがあり、その場合ビットが永久に
+// 立ったままになる。すると次の左クリックは `buttons != 0` のため Down では
+// なく Move として Flutter に渡り、TapGestureRecognizer (左ボタン単独のみ
+// 受理) が反応しなくなる。一方 mouseMoved は Move として届き続けるので
+// MouseRegion/ツールチップは動く — 症状と一致する。このエンジン内部状態は
+// アプリから直接は読めない (private な C++ struct) ため、間接的に修復する。
+//
+// 対策: 左クリック/右クリックの直前に、OS が把握している「実際に押されて
+// いるボタン」(NSEvent.pressedMouseButtons) と食い違うビットについて、
+// 対応する Up イベントを合成してエンジンに送り込み内部状態を修復する。
+// 健全な状態でも毎回 Up を合成することになるが、エンジン側は該当ビットが
+// 既に 0 なら Hover イベントを 1 つ余分に送るだけで無害。ビットが立っていた
+// 場合だけ実際に修復される。
+final class MouseButtonStateRepair {
+  static let shared = MouseButtonStateRepair()
+
+  private init() {}
+
+  private static let logDefaultsKey = "GoroMouseRepairLog"
+
+  /// 左クリック/右クリックの直前に割り込んで状態を点検するローカルモニタを
+  /// インストールする。ハンドラは必ず元の event をそのまま返す (イベントを
+  /// 消費/変更しない)。
+  private var monitor: Any?
+
+  func install() {
+    if monitor != nil { return } // 二重インストール防止 (合成 Up が重複しないように)
+    monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+      self?.repairStaleButtons(observedBy: event)
+      return event
+    }
+  }
+
+  private func repairStaleButtons(observedBy event: NSEvent) {
+    guard let window = event.window,
+          let controller = window.contentViewController as? FlutterViewController
+    else {
+      return
+    }
+
+    // OS が把握している「今物理的に押されているボタン」のビット集合。
+    // bit0 = 左, bit1 = 右, bit2〜 = その他 (サイドボタン等)。
+    let pressed = NSEvent.pressedMouseButtons
+    let shouldLog = UserDefaults.standard.bool(forKey: MouseButtonStateRepair.logDefaultsKey)
+
+    // 右ボタン (bit 1) が実際には押されていないなら、Flutter 側で立ったまま
+    // かもしれないので Up を合成して確実に下ろす。
+    if pressed & (1 << 1) == 0 {
+      if let synthetic = syntheticUpEvent(buttonNumber: 1, cgType: .rightMouseUp) {
+        if shouldLog {
+          NSLog("MouseButtonStateRepair: synthesized rightMouseUp")
+        }
+        controller.rightMouseUp(with: synthetic)
+      }
+    }
+
+    // サイドボタン等 (bit 2〜4) も同様に点検する。
+    for buttonNumber in 2...4 {
+      if pressed & (1 << buttonNumber) == 0 {
+        if let synthetic = syntheticUpEvent(buttonNumber: buttonNumber, cgType: .otherMouseUp) {
+          if shouldLog {
+            NSLog("MouseButtonStateRepair: synthesized otherMouseUp(\(buttonNumber))")
+          }
+          controller.otherMouseUp(with: synthetic)
+        }
+      }
+    }
+  }
+
+  /// 指定ボタン番号の Up イベントを CGEvent 経由で合成する。位置は Flutter
+  /// 側で hover 相当として処理されるだけなので厳密でなくてよい。
+  ///
+  /// 注意: `CGMouseButton` は `.left`/`.right`/`.center` の3値しか持たない
+  /// Swift enum で、4番目以降のサイドボタンを rawValue から直接作ろうとする
+  /// と (`CGMouseButton(rawValue:)` が nil を返し) 強制アンラップでクラッシュ
+  /// する。そのため `mouseButton:` にはダミーの有効値を渡してイベントを
+  /// 作ってから、`setIntegerValueField(.mouseEventButtonNumber:)` で
+  /// `NSEvent.buttonNumber` が読む実体のフィールドを上書きする。
+  private func syntheticUpEvent(buttonNumber: Int, cgType: CGEventType) -> NSEvent? {
+    let location = NSEvent.mouseLocation
+    let screenHeight = NSScreen.screens.first?.frame.height ?? 0
+    // NSEvent.mouseLocation は左下原点 (Cocoa 座標)。CGEvent は左上原点
+    // なので Y を反転する。
+    let cgPoint = CGPoint(x: location.x, y: screenHeight - location.y)
+
+    guard let cgEvent = CGEvent(
+      mouseEventSource: nil,
+      mouseType: cgType,
+      mouseCursorPosition: cgPoint,
+      mouseButton: .left
+    ) else {
+      return nil
+    }
+    cgEvent.setIntegerValueField(.mouseEventButtonNumber, value: Int64(buttonNumber))
+    return NSEvent(cgEvent: cgEvent)
   }
 }
