@@ -200,7 +200,17 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
     // 既存のセッションウィンドウがあれば、その上にタブとして追加する。
     // 無ければ単独ウィンドウとして開く。
     if let host = hostWindowForNewTab() {
-      host.addTabbedWindow(window, ordered: .above)
+      // tabBaseNames は挿入位置の計算 (insertionIndex) が参照するため、
+      // タブを挿入する前に設定しておく。
+      tabBaseNames[window] = tmuxSessionName
+      if let group = host.tabGroup {
+        // 新ウィンドウ自身はまだ group に入っていないので、insertionIndex は
+        // 既存タブだけを見て位置を決める。tmux セッション名の自然順に並べる。
+        group.insertWindow(
+          window, at: insertionIndex(forSessionNamed: tmuxSessionName, in: group))
+      } else {
+        host.addTabbedWindow(window, ordered: .above)
+      }
       window.makeKeyAndOrderFront(nil)
     } else {
       window.center()
@@ -216,6 +226,8 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
 
     // タブ表示名は短い tmux セッション名にして省略を減らし、ホバーの
     // ツールチップに完全名 (label) を出す。
+    // (tabBaseNames[window] はホスト分岐でタブ挿入前に設定済み。
+    //  host が無い単独ウィンドウの場合はここで設定する。)
     tabBaseNames[window] = tmuxSessionName
     DispatchQueue.main.async { [weak window] in
       guard let window = window else { return }
@@ -223,6 +235,21 @@ class DetachedWindowManager: NSObject, NSWindowDelegate {
       window.tab.toolTip = label
     }
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  /// group 内で、名前 name の新しいセッションタブを挿入すべき位置を返す。
+  /// セッションウィンドウ (tabBaseNames にあるもの) だけを比較対象にし、
+  /// 自然順 (localizedStandardCompare) で name より後ろになる最初のタブの位置に入れる。
+  /// メインウィンドウなど tabBaseNames に無いウィンドウは飛ばす (位置を保つ)。
+  /// 該当が無ければ末尾。
+  private func insertionIndex(forSessionNamed name: String, in group: NSWindowTabGroup) -> Int {
+    for (index, w) in group.windows.enumerated() {
+      guard let existing = tabBaseNames[w] else { continue }
+      if existing.localizedStandardCompare(name) == .orderedDescending {
+        return index
+      }
+    }
+    return group.windows.count
   }
 
   /// sessionKey に対応するセッションウィンドウを返す。
