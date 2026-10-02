@@ -594,6 +594,22 @@ void main() {
       expect(state.value?.sessions[1].name, 'valid2');
     });
 
+    test('sorts sessions in natural order (uninote-2 before uninote-10)',
+        () async {
+      const sep = '|||';
+      final output = [
+        'uninote-1${sep}1${sep}0${sep}1700000000',
+        'uninote-10${sep}1${sep}0${sep}1700000001',
+        'uninote-11${sep}1${sep}0${sep}1700000002',
+        'uninote-2${sep}1${sep}0${sep}1700000003',
+      ].join('\n');
+
+      final state = await stateAfterInit(makeMalformedListManager(output));
+
+      expect(state.value?.sessions.map((s) => s.name).toList(),
+          ['uninote-1', 'uninote-2', 'uninote-10', 'uninote-11']);
+    });
+
     test('returns empty sessions when all lines have wrong field count', () async {
       const sep = '|||';
       final output = [

@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/error/app_error.dart';
 import '../../core/ssh/ssh_channel_manager.dart';
 import '../../core/utils/app_logger.dart';
+import '../../core/utils/natural_sort.dart';
 import '../../core/utils/shell_utils.dart';
 import '../terminal/terminal_connection_provider.dart';
 import 'tmux_commands.dart';
@@ -462,6 +463,9 @@ class TmuxNotifier extends FamilyAsyncNotifier<TmuxState, String> {
         ),
       ));
     }
+
+    // tmux の出力順は文字列順 (uninote-1, uninote-10, uninote-2) なので自然順に直す。
+    sessions.sort((a, b) => compareNatural(a.name, b.name));
 
     // 各セッションの全 pane を capture-pane して Claude 稼働状態を判定。
     // 失敗してもセッション一覧自体には影響させない（best-effort）。
